@@ -159,11 +159,12 @@ export function IconUpload({ subscriptionId, currentIcon, currentMimeType, onUpd
             <div className="space-y-3">
               <div className="grid gap-2">
                 <Label>选择图片</Label>
-                <Input
+                <input
                   ref={fileRef}
                   type="file"
                   accept={ACCEPTED_TYPES}
                   onChange={handleFileSelect}
+                  className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground"
                 />
                 <p className="text-xs text-muted-foreground">
                   支持 PNG、JPG、SVG、WebP，最大 512KB
