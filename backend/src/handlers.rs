@@ -319,6 +319,7 @@ fn import_single_subscription(
     let color = item.get("color").and_then(|v| v.as_i64());
     let notes = item.get("notes").and_then(|v| v.as_str());
     let link = item.get("link").and_then(|v| v.as_str());
+    let should_be_tinted = item.get("shouldBeTinted").and_then(|v| v.as_bool()).unwrap_or(false);
     let is_reminder_enabled = item.get("isReminderEnabled").and_then(|v| v.as_bool()).unwrap_or(true);
     let reminder_type_raw = item.get("reminderType").and_then(|v| v.as_str()).unwrap_or("ONE_DAY");
     let reminder_type = reminder_type_raw.to_lowercase();
@@ -347,14 +348,14 @@ fn import_single_subscription(
 
     conn.execute(
         "INSERT OR REPLACE INTO subscriptions (id, name, price, currency, billing_cycle, billing_date, \
-         next_bill_date, end_date, is_one_time, is_suspended, color, icon, icon_mime_type, category_id, \
+         next_bill_date, end_date, is_one_time, is_suspended, color, icon, icon_mime_type, should_be_tinted, category_id, \
          notes, link, is_reminder_enabled, reminder_type, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,NULL,?14,?15,?16,?17,?18,?18)",
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,NULL,?15,?16,?17,?18,?19,?19)",
         rusqlite::params![
             id, title, price, currency, billing_cycle,
             billing_date, next_bill_date.as_deref(), end_date.as_deref(),
             is_one_time as i32, is_suspended as i32,
-            color, icon_blob, "image/png",
+            color, icon_blob, "image/png", should_be_tinted as i32,
             notes, link, is_reminder_enabled as i32, reminder_type, now,
         ],
     ).map_err(|e| e.to_string())?;
