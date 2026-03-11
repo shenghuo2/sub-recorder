@@ -20,7 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Subscription, Category } from "@/lib/types";
-import { BILLING_CYCLES, CURRENCIES } from "@/lib/types";
+import { BILLING_CYCLES } from "@/lib/types";
+import { SUPPORTED_CURRENCIES as CURRENCIES, getSymbol } from "@/lib/currency";
 import { PRESET_COLORS } from "@/lib/color";
 import { intToHex, hexToInt } from "@/lib/color";
 import * as api from "@/lib/api";
@@ -175,7 +176,7 @@ export function SubscriptionDialog({
                 <SelectContent>
                   {CURRENCIES.map((c) => (
                     <SelectItem key={c} value={c}>
-                      {c}
+                      {getSymbol(c)} {c}
                     </SelectItem>
                   ))}
                 </SelectContent>

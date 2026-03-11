@@ -22,6 +22,8 @@ export interface Subscription {
   reminder_type: string | null;
   created_at: string;
   updated_at: string;
+  effective_price: number;
+  effective_currency: string;
 }
 
 export interface SubscriptionDetail {
@@ -89,19 +91,10 @@ export const BILLING_CYCLES: Record<string, string> = {
   year_3: "每3年",
 };
 
-export const CURRENCIES = [
-  "CNY", "USD", "EUR", "GBP", "JPY", "KRW", "INR", "RUB", "HKD", "TWD",
-];
+export { SUPPORTED_CURRENCIES as CURRENCIES, getSymbol, formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 
-export const CURRENCY_SYMBOLS: Record<string, string> = {
-  CNY: "¥",
-  USD: "$",
-  EUR: "€",
-  GBP: "£",
-  JPY: "¥",
-  KRW: "₩",
-  INR: "₹",
-  RUB: "₽",
-  HKD: "HK$",
-  TWD: "NT$",
-};
+// 保留旧的 CURRENCY_SYMBOLS 兼容性（从 currency 模块获取）
+import { SUPPORTED_CURRENCIES, getSymbol } from "@/lib/currency";
+export const CURRENCY_SYMBOLS: Record<string, string> = Object.fromEntries(
+  SUPPORTED_CURRENCIES.map((c) => [c, getSymbol(c)])
+);

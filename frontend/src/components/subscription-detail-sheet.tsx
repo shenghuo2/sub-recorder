@@ -31,7 +31,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { Subscription, SubscriptionDetail, BillingRecord } from "@/lib/types";
-import { CURRENCY_SYMBOLS, BILLING_CYCLES } from "@/lib/types";
+import { BILLING_CYCLES } from "@/lib/types";
+import { formatCurrencyCompact } from "@/lib/currency";
 import { intToHex, getContrastColor } from "@/lib/color";
 import { IconUpload } from "@/components/icon-upload";
 import * as api from "@/lib/api";
@@ -229,16 +230,12 @@ export function SubscriptionDetailSheet({
 
                 <div className="mt-4 flex items-baseline gap-1">
                   <span className="text-3xl font-bold">
-                    {CURRENCY_SYMBOLS[detail.effective_currency] || detail.effective_currency}
-                    {detail.effective_price % 1 === 0
-                      ? detail.effective_price
-                      : detail.effective_price.toFixed(2)}
+                    {formatCurrencyCompact(detail.effective_price, detail.effective_currency)}
                   </span>
                   {(detail.effective_price !== detail.price ||
                     detail.effective_currency !== detail.currency) && (
                     <span className="text-sm opacity-70 ml-2 line-through">
-                      {CURRENCY_SYMBOLS[detail.currency] || detail.currency}
-                      {detail.price}
+                      {formatCurrencyCompact(detail.price, detail.currency)}
                     </span>
                   )}
                 </div>
@@ -366,10 +363,7 @@ export function SubscriptionDetailSheet({
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-medium">
-                              {CURRENCY_SYMBOLS[record.currency] || record.currency}
-                              {record.amount % 1 === 0
-                                ? record.amount
-                                : record.amount.toFixed(2)}
+                              {formatCurrencyCompact(record.amount, record.currency)}
                             </span>
                             {record.notes && (
                               <span className="text-xs text-muted-foreground">
