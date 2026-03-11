@@ -32,6 +32,7 @@ pub fn init_db(conn: &Connection) {
             color INTEGER,
             icon BLOB,
             icon_mime_type TEXT DEFAULT 'image/png',
+            should_be_tinted INTEGER NOT NULL DEFAULT 0,
             category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
             notes TEXT,
             link TEXT,
@@ -56,6 +57,9 @@ pub fn init_db(conn: &Connection) {
         CREATE INDEX IF NOT EXISTS idx_billing_records_sub_id ON billing_records(subscription_id);
         CREATE INDEX IF NOT EXISTS idx_billing_records_period ON billing_records(period_start, period_end);
     ").expect("Failed to initialize database");
+
+    // Migration: add should_be_tinted column if not exists
+    let _ = conn.execute_batch("ALTER TABLE subscriptions ADD COLUMN should_be_tinted INTEGER NOT NULL DEFAULT 0;");
 }
 
 // ========== 分类 ==========
@@ -110,19 +114,20 @@ fn row_to_subscription(row: &rusqlite::Row) -> rusqlite::Result<Subscription> {
         color: row.get(12)?,
         icon,
         icon_mime_type: row.get(14)?,
-        category_id: row.get(15)?,
-        notes: row.get(16)?,
-        link: row.get(17)?,
-        is_reminder_enabled: row.get::<_, i32>(18)? != 0,
-        reminder_type: row.get(19)?,
-        created_at: row.get(20)?,
-        updated_at: row.get(21)?,
+        should_be_tinted: row.get::<_, i32>(15)? != 0,
+        category_id: row.get(16)?,
+        notes: row.get(17)?,
+        link: row.get(18)?,
+        is_reminder_enabled: row.get::<_, i32>(19)? != 0,
+        reminder_type: row.get(20)?,
+        created_at: row.get(21)?,
+        updated_at: row.get(22)?,
     })
 }
 
 const SUB_COLUMNS: &str = "id, name, price, currency, billing_cycle, billing_date, \
     next_bill_date, end_date, is_one_time, is_suspended, suspended_at, suspended_until, \
-    color, icon, icon_mime_type, category_id, notes, link, is_reminder_enabled, reminder_type, \
+    color, icon, icon_mime_type, should_be_tinted, category_id, notes, link, is_reminder_enabled, reminder_type, \
     created_at, updated_at";
 
 pub fn create_subscription(conn: &Connection, input: &CreateSubscription) -> rusqlite::Result<Subscription> {
@@ -148,9 +153,9 @@ pub fn create_subscription(conn: &Connection, input: &CreateSubscription) -> rus
 
     conn.execute(
         "INSERT INTO subscriptions (id, name, price, currency, billing_cycle, billing_date, \
-         next_bill_date, end_date, is_one_time, is_suspended, color, icon, icon_mime_type, category_id, \
+         next_bill_date, end_date, is_one_time, is_suspended, color, icon, icon_mime_type, should_be_tinted, category_id, \
          notes, link, is_reminder_enabled, reminder_type, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11,?12,?13,?14,?15,?16,?17,?18,?18)",
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?19)",
         params![
             id,
             input.name,
@@ -164,6 +169,7 @@ pub fn create_subscription(conn: &Connection, input: &CreateSubscription) -> rus
             input.color,
             icon_blob,
             mime_type,
+            input.should_be_tinted.unwrap_or(false) as i32,
             input.category_id,
             input.notes,
             input.link,
@@ -186,11 +192,37 @@ pub fn get_subscription(conn: &Connection, id: &str) -> rusqlite::Result<Option<
     }
 }
 
-pub fn list_subscriptions(conn: &Connection) -> rusqlite::Result<Vec<Subscription>> {
+pub fn list_subscriptions(conn: &Connection) -> rusqlite::Result<Vec<SubscriptionWithEffective>> {
     let sql = format!("SELECT {} FROM subscriptions ORDER BY next_bill_date ASC NULLS LAST, name ASC", SUB_COLUMNS);
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], row_to_subscription)?;
-    rows.collect()
+    let subs: Vec<Subscription> = stmt.query_map([], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
+
+    let today = chrono::Local::now().date_naive();
+    // 批量查询所有当前周期的账单记录
+    let mut br_stmt = conn.prepare(
+        "SELECT subscription_id, amount, currency FROM billing_records \
+         WHERE period_start <= ?1 AND period_end > ?1"
+    )?;
+    let effective_map: std::collections::HashMap<String, (f64, String)> = br_stmt
+        .query_map(params![today.to_string()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, String>(2)?))
+        })?
+        .filter_map(|r| r.ok())
+        .map(|(id, amount, currency)| (id, (amount, currency)))
+        .collect();
+
+    let result = subs.into_iter().map(|s| {
+        let (ep, ec) = effective_map.get(&s.id)
+            .map(|(a, c)| (*a, c.clone()))
+            .unwrap_or_else(|| (s.price, s.currency.clone()));
+        SubscriptionWithEffective {
+            subscription: s,
+            effective_price: ep,
+            effective_currency: ec,
+        }
+    }).collect();
+
+    Ok(result)
 }
 
 pub fn update_subscription(conn: &Connection, id: &str, input: &UpdateSubscription) -> rusqlite::Result<Option<Subscription>> {
@@ -208,6 +240,7 @@ pub fn update_subscription(conn: &Connection, id: &str, input: &UpdateSubscripti
     let is_one_time = input.is_one_time.unwrap_or(existing.is_one_time);
     let color = if input.color.is_some() { input.color } else { existing.color };
     let category_id = if input.category_id.is_some() { input.category_id } else { existing.category_id };
+    let should_be_tinted = input.should_be_tinted.unwrap_or(existing.should_be_tinted);
     let notes = if input.notes.is_some() { input.notes.clone() } else { existing.notes };
     let link = if input.link.is_some() { input.link.clone() } else { existing.link };
     let is_reminder_enabled = input.is_reminder_enabled.unwrap_or(existing.is_reminder_enabled);
@@ -232,15 +265,15 @@ pub fn update_subscription(conn: &Connection, id: &str, input: &UpdateSubscripti
         conn.execute(
             "UPDATE subscriptions SET name=?1, price=?2, currency=?3, billing_cycle=?4, \
              billing_date=?5, next_bill_date=?6, end_date=?7, is_one_time=?8, color=?9, \
-             icon=?10, category_id=?11, notes=?12, link=?13, is_reminder_enabled=?14, \
-             reminder_type=?15, updated_at=?16 WHERE id=?17",
+             icon=?10, should_be_tinted=?11, category_id=?12, notes=?13, link=?14, is_reminder_enabled=?15, \
+             reminder_type=?16, updated_at=?17 WHERE id=?18",
             params![
                 name, price, currency, billing_cycle,
                 billing_date.to_string(),
                 next_bill.map(|d| d.to_string()),
                 end_date.map(|d| d.to_string()),
                 is_one_time as i32,
-                color, blob, category_id, notes, link,
+                color, blob, should_be_tinted as i32, category_id, notes, link,
                 is_reminder_enabled as i32, reminder_type, now, id
             ],
         )?;
@@ -248,15 +281,15 @@ pub fn update_subscription(conn: &Connection, id: &str, input: &UpdateSubscripti
         conn.execute(
             "UPDATE subscriptions SET name=?1, price=?2, currency=?3, billing_cycle=?4, \
              billing_date=?5, next_bill_date=?6, end_date=?7, is_one_time=?8, color=?9, \
-             category_id=?10, notes=?11, link=?12, is_reminder_enabled=?13, \
-             reminder_type=?14, updated_at=?15 WHERE id=?16",
+             should_be_tinted=?10, category_id=?11, notes=?12, link=?13, is_reminder_enabled=?14, \
+             reminder_type=?15, updated_at=?16 WHERE id=?17",
             params![
                 name, price, currency, billing_cycle,
                 billing_date.to_string(),
                 next_bill.map(|d| d.to_string()),
                 end_date.map(|d| d.to_string()),
                 is_one_time as i32,
-                color, category_id, notes, link,
+                color, should_be_tinted as i32, category_id, notes, link,
                 is_reminder_enabled as i32, reminder_type, now, id
             ],
         )?;

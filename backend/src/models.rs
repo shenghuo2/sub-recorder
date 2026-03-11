@@ -271,6 +271,16 @@ impl<T: Serialize> ApiResponse<T> {
     }
 }
 
+// ========== 订阅列表项（包含有效价格） ==========
+
+#[derive(Debug, Serialize)]
+pub struct SubscriptionWithEffective {
+    #[serde(flatten)]
+    pub subscription: Subscription,
+    pub effective_price: f64,
+    pub effective_currency: String,
+}
+
 // ========== 订阅详情（包含账单记录和有效价格） ==========
 
 #[derive(Debug, Serialize)]
