@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Subscription, Category } from "@/lib/types";
-import { BILLING_CYCLES } from "@/lib/types";
+import { BILLING_CYCLES, BILLING_CYCLE_LABELS, parseCustomDays } from "@/lib/types";
 import { SUPPORTED_CURRENCIES as CURRENCIES, getSymbol } from "@/lib/currency";
 import { PRESET_COLORS } from "@/lib/color";
 import { intToHex, hexToInt } from "@/lib/color";
@@ -49,6 +49,7 @@ export function SubscriptionDialog({
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState("CNY");
   const [billingCycle, setBillingCycle] = useState("month_1");
+  const [customEndDate, setCustomEndDate] = useState("");
   const [billingDate, setBillingDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [isOneTime, setIsOneTime] = useState(false);
@@ -69,7 +70,17 @@ export function SubscriptionDialog({
         setName(subscription.name);
         setPrice(String(subscription.price));
         setCurrency(subscription.currency);
-        setBillingCycle(subscription.billing_cycle);
+        // Handle custom_days:XX format
+        const parsedDays = parseCustomDays(subscription.billing_cycle);
+        if (parsedDays !== null) {
+          setBillingCycle("custom_days");
+          // Compute end date from billing_date + days
+          const bd = new Date(subscription.billing_date);
+          bd.setDate(bd.getDate() + parsedDays);
+          setCustomEndDate(bd.toISOString().split("T")[0]);
+        } else {
+          setBillingCycle(subscription.billing_cycle);
+        }
         setBillingDate(subscription.billing_date);
         setEndDate(subscription.end_date || "");
         setIsOneTime(subscription.is_one_time);
@@ -87,6 +98,7 @@ export function SubscriptionDialog({
         setPrice("");
         setCurrency("CNY");
         setBillingCycle("month_1");
+        setCustomEndDate("");
         setBillingDate(new Date().toISOString().split("T")[0]);
         setEndDate("");
         setIsOneTime(false);
@@ -119,11 +131,20 @@ export function SubscriptionDialog({
 
     setSaving(true);
     try {
+      // Construct billing_cycle value - use custom_days:XX format if custom
+      let effectiveBillingCycle = billingCycle;
+      if (billingCycle === "custom_days" && customEndDate && billingDate) {
+        const start = new Date(billingDate);
+        const end = new Date(customEndDate);
+        const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        effectiveBillingCycle = `custom_days:${diffDays}`;
+      }
+      
       const data = {
         name: name.trim(),
         price: Number(price),
         currency,
-        billing_cycle: billingCycle,
+        billing_cycle: effectiveBillingCycle,
         billing_date: billingDate,
         end_date: endDate || null,
         is_one_time: isOneTime,
@@ -167,10 +188,19 @@ export function SubscriptionDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
-          {/* 图标 + 名称 */}
-          <div className="flex gap-4 items-start">
-            <div className="shrink-0">
-              <Label className="text-xs text-muted-foreground mb-1 block">图标</Label>
+          {/* 名称 + 图标 */}
+          <div className="flex gap-4 items-end">
+            <div className="flex-1 grid gap-2">
+              <Label htmlFor="name">名称</Label>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="如：Netflix"
+              />
+            </div>
+            <div className="shrink-0 grid gap-2">
+              <Label>图标</Label>
               <IconUpload
                 subscriptionId={subscription?.id}
                 currentIcon={icon}
@@ -181,15 +211,6 @@ export function SubscriptionDialog({
                     setIconMimeType(newMime);
                   }
                 }}
-              />
-            </div>
-            <div className="flex-1 grid gap-2">
-              <Label htmlFor="name">名称</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="如：Netflix"
               />
             </div>
           </div>
@@ -227,18 +248,29 @@ export function SubscriptionDialog({
           {/* 计费周期 */}
           <div className="grid gap-2">
             <Label>计费周期</Label>
-            <Select value={billingCycle} onValueChange={setBillingCycle}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(BILLING_CYCLES).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>
-                    {v}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex gap-2">
+              <Select value={billingCycle} onValueChange={setBillingCycle}>
+                <SelectTrigger className={billingCycle === "custom_days" ? "w-[120px]" : "w-full"}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BILLING_CYCLES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {BILLING_CYCLE_LABELS[c]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {billingCycle === "custom_days" && (
+                <div className="flex items-center gap-1 flex-1">
+                  <Input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 账单日期 */}
