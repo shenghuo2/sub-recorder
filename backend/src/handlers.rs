@@ -262,6 +262,20 @@ pub async fn list_categories(state: web::Data<AppState>) -> HttpResponse {
     }
 }
 
+pub async fn update_category(
+    state: web::Data<AppState>,
+    path: web::Path<i64>,
+    body: web::Json<UpdateCategory>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    let id = path.into_inner();
+    match db::update_category(&conn, id, &body) {
+        Ok(Some(cat)) => HttpResponse::Ok().json(ApiResponse::ok(cat)),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::<()>::err("分类不存在")),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
 pub async fn delete_category(
     state: web::Data<AppState>,
     path: web::Path<i64>,
@@ -279,13 +293,79 @@ pub async fn delete_category(
 
 pub async fn import_data(
     state: web::Data<AppState>,
-    body: web::Json<Vec<serde_json::Value>>,
+    body: web::Json<serde_json::Value>,
 ) -> HttpResponse {
     let conn = state.db.lock().unwrap();
     let mut imported = 0;
     let mut errors: Vec<String> = Vec::new();
 
-    for item in body.iter() {
+    // Support two formats:
+    // 1. Full object: { "subscriptions": [...], "categories": [...] }
+    // 2. Raw array: [ { subscription }, ... ]
+    let (subscriptions, categories) = if body.is_array() {
+        (body.as_array().cloned().unwrap_or_default(), vec![])
+    } else if body.is_object() {
+        let subs = body.get("subscriptions").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let cats = body.get("categories").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        (subs, cats)
+    } else {
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::err("无效的导入格式"));
+    };
+
+    // Import categories from the JSON (with icons and titles)
+    for cat in &categories {
+        let cat_id = match cat.get("id").and_then(|v| v.as_i64()) {
+            Some(id) => id,
+            None => continue,
+        };
+        let title = cat.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let icon_b64 = cat.get("icon").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        // Update existing or create new
+        if db::get_category(&conn, cat_id).ok().flatten().is_some() {
+            // Update icon and title if category already exists
+            let _ = db::update_category(&conn, cat_id, &UpdateCategory {
+                name: if title.is_empty() { None } else { Some(title) },
+                color: None,
+                icon: icon_b64,
+                icon_mime_type: Some("image/png".to_string()),
+                fa_icon: None,
+            });
+        } else {
+            let name = if title.is_empty() { format!("分类 {}", cat_id) } else { title };
+            let _ = db::create_category(&conn, &CreateCategory {
+                id: Some(cat_id),
+                name,
+                color: None,
+                icon: icon_b64,
+                icon_mime_type: Some("image/png".to_string()),
+                fa_icon: None,
+            });
+        }
+    }
+
+    // Build a set of known category ids from imported categories
+    let known_cat_ids: std::collections::HashSet<i64> = categories.iter()
+        .filter_map(|c| c.get("id").and_then(|v| v.as_i64()))
+        .collect();
+
+    for item in &subscriptions {
+        // Ensure category exists for this subscription's categoryId
+        if let Some(cat_id) = item.get("categoryId").and_then(|v| v.as_i64()) {
+            if cat_id > 0 && !known_cat_ids.contains(&cat_id) {
+                if db::get_category(&conn, cat_id).ok().flatten().is_none() {
+                    let _ = db::create_category(&conn, &CreateCategory {
+                        id: Some(cat_id),
+                        name: format!("未知分类 {}", cat_id),
+                        color: None,
+                        icon: None,
+                        icon_mime_type: None,
+                        fa_icon: None,
+                    });
+                }
+            }
+        }
+
         match import_single_subscription(&conn, item) {
             Ok(_) => imported += 1,
             Err(e) => {
@@ -295,7 +375,7 @@ pub async fn import_data(
         }
     }
 
-    let msg = format!("导入成功 {} 条", imported);
+    let msg = format!("导入成功 {} 条, 分类 {} 条", imported, categories.len());
     if errors.is_empty() {
         HttpResponse::Ok().json(ApiResponse::ok(msg))
     } else {
@@ -320,6 +400,7 @@ fn import_single_subscription(
     let notes = item.get("notes").and_then(|v| v.as_str());
     let link = item.get("link").and_then(|v| v.as_str());
     let should_be_tinted = item.get("shouldBeTinted").and_then(|v| v.as_bool()).unwrap_or(false);
+    let category_id = item.get("categoryId").and_then(|v| v.as_i64());
     let is_reminder_enabled = item.get("isReminderEnabled").and_then(|v| v.as_bool()).unwrap_or(true);
     let reminder_type_raw = item.get("reminderType").and_then(|v| v.as_str()).unwrap_or("ONE_DAY");
     let reminder_type = reminder_type_raw.to_lowercase();
@@ -350,12 +431,13 @@ fn import_single_subscription(
         "INSERT OR REPLACE INTO subscriptions (id, name, price, currency, billing_cycle, billing_date, \
          next_bill_date, end_date, is_one_time, is_suspended, color, icon, icon_mime_type, should_be_tinted, category_id, \
          notes, link, is_reminder_enabled, reminder_type, created_at, updated_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,NULL,?15,?16,?17,?18,?19,?19)",
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?20)",
         rusqlite::params![
             id, title, price, currency, billing_cycle,
             billing_date, next_bill_date.as_deref(), end_date.as_deref(),
             is_one_time as i32, is_suspended as i32,
             color, icon_blob, "image/png", should_be_tinted as i32,
+            category_id,
             notes, link, is_reminder_enabled as i32, reminder_type, now,
         ],
     ).map_err(|e| e.to_string())?;

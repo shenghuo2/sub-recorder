@@ -57,6 +57,7 @@ async fn main() -> std::io::Result<()> {
             // 分类
             .route("/api/categories", web::get().to(handlers::list_categories))
             .route("/api/categories", web::post().to(handlers::create_category))
+            .route("/api/categories/{id}", web::put().to(handlers::update_category))
             .route("/api/categories/{id}", web::delete().to(handlers::delete_category))
             // 导入
             .route("/api/import", web::post().to(handlers::import_data))

@@ -214,12 +214,28 @@ pub struct Category {
     pub id: i64,
     pub name: String,
     pub color: Option<i64>,
+    pub icon: Option<String>,
+    pub icon_mime_type: Option<String>,
+    pub fa_icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCategory {
+    pub id: Option<i64>,
     pub name: String,
     pub color: Option<i64>,
+    pub icon: Option<String>,
+    pub icon_mime_type: Option<String>,
+    pub fa_icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCategory {
+    pub name: Option<String>,
+    pub color: Option<i64>,
+    pub icon: Option<String>,
+    pub icon_mime_type: Option<String>,
+    pub fa_icon: Option<String>,
 }
 
 // ========== 暂停/恢复 ==========

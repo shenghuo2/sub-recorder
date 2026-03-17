@@ -13,7 +13,10 @@ pub fn init_db(conn: &Connection) {
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            color INTEGER
+            color INTEGER,
+            icon BLOB,
+            icon_mime_type TEXT DEFAULT 'image/png',
+            fa_icon TEXT
         );
 
         CREATE TABLE IF NOT EXISTS subscriptions (
@@ -60,34 +63,172 @@ pub fn init_db(conn: &Connection) {
 
     // Migration: add should_be_tinted column if not exists
     let _ = conn.execute_batch("ALTER TABLE subscriptions ADD COLUMN should_be_tinted INTEGER NOT NULL DEFAULT 0;");
+
+    // Migration: add icon columns to categories if not exists
+    let _ = conn.execute_batch("ALTER TABLE categories ADD COLUMN icon BLOB;");
+    let _ = conn.execute_batch("ALTER TABLE categories ADD COLUMN icon_mime_type TEXT DEFAULT 'image/png';");
+    let _ = conn.execute_batch("ALTER TABLE categories ADD COLUMN fa_icon TEXT;");
+
+    // Seed built-in categories (id 0-30) if they don't exist
+    seed_default_categories(conn);
 }
 
 // ========== 分类 ==========
 
 pub fn create_category(conn: &Connection, input: &CreateCategory) -> rusqlite::Result<Category> {
-    conn.execute(
-        "INSERT INTO categories (name, color) VALUES (?1, ?2)",
-        params![input.name, input.color],
-    )?;
-    let id = conn.last_insert_rowid();
-    Ok(Category { id, name: input.name.clone(), color: input.color })
+    let icon_blob: Option<Vec<u8>> = input.icon.as_ref().map(|s| {
+        use base64::Engine;
+        let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+        base64::engine::general_purpose::STANDARD.decode(&cleaned).unwrap_or_default()
+    });
+    let mime = input.icon.as_ref().map(|_| {
+        input.icon_mime_type.as_deref().unwrap_or("image/png").to_string()
+    });
+
+    if let Some(explicit_id) = input.id {
+        conn.execute(
+            "INSERT OR REPLACE INTO categories (id, name, color, icon, icon_mime_type, fa_icon) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![explicit_id, input.name, input.color, icon_blob, mime, input.fa_icon],
+        )?;
+        Ok(Category { id: explicit_id, name: input.name.clone(), color: input.color, icon: input.icon.clone(), icon_mime_type: input.icon_mime_type.clone(), fa_icon: input.fa_icon.clone() })
+    } else {
+        conn.execute(
+            "INSERT INTO categories (name, color, icon, icon_mime_type, fa_icon) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![input.name, input.color, icon_blob, mime, input.fa_icon],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(Category { id, name: input.name.clone(), color: input.color, icon: input.icon.clone(), icon_mime_type: input.icon_mime_type.clone(), fa_icon: input.fa_icon.clone() })
+    }
 }
 
 pub fn list_categories(conn: &Connection) -> rusqlite::Result<Vec<Category>> {
-    let mut stmt = conn.prepare("SELECT id, name, color FROM categories ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT id, name, color, icon, icon_mime_type, fa_icon FROM categories ORDER BY id")?;
     let rows = stmt.query_map([], |row| {
+        let icon_blob: Option<Vec<u8>> = row.get(3)?;
+        let icon = icon_blob.map(|b| {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(&b)
+        });
         Ok(Category {
             id: row.get(0)?,
             name: row.get(1)?,
             color: row.get(2)?,
+            icon,
+            icon_mime_type: row.get(4)?,
+            fa_icon: row.get(5)?,
         })
     })?;
     rows.collect()
 }
 
+pub fn get_category(conn: &Connection, id: i64) -> rusqlite::Result<Option<Category>> {
+    let mut stmt = conn.prepare("SELECT id, name, color, icon, icon_mime_type, fa_icon FROM categories WHERE id = ?1")?;
+    let mut rows = stmt.query_map(params![id], |row| {
+        let icon_blob: Option<Vec<u8>> = row.get(3)?;
+        let icon = icon_blob.map(|b| {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(&b)
+        });
+        Ok(Category {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            color: row.get(2)?,
+            icon,
+            icon_mime_type: row.get(4)?,
+            fa_icon: row.get(5)?,
+        })
+    })?;
+    match rows.next() {
+        Some(r) => Ok(Some(r?)),
+        None => Ok(None),
+    }
+}
+
+pub fn update_category(conn: &Connection, id: i64, input: &UpdateCategory) -> rusqlite::Result<Option<Category>> {
+    let existing = match get_category(conn, id)? {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    let name = input.name.as_deref().unwrap_or(&existing.name);
+    let color = if input.color.is_some() { input.color } else { existing.color };
+    let fa_icon = if input.fa_icon.is_some() { input.fa_icon.clone() } else { existing.fa_icon };
+
+    if let Some(icon_b64) = &input.icon {
+        let icon_blob: Vec<u8> = {
+            use base64::Engine;
+            let cleaned: String = icon_b64.chars().filter(|c| !c.is_whitespace()).collect();
+            base64::engine::general_purpose::STANDARD.decode(&cleaned).unwrap_or_default()
+        };
+        let mime = input.icon_mime_type.as_deref().unwrap_or("image/png");
+        conn.execute(
+            "UPDATE categories SET name=?1, color=?2, icon=?3, icon_mime_type=?4, fa_icon=?5 WHERE id=?6",
+            params![name, color, icon_blob, mime, fa_icon, id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE categories SET name=?1, color=?2, fa_icon=?3 WHERE id=?4",
+            params![name, color, fa_icon, id],
+        )?;
+    }
+
+    get_category(conn, id)
+}
+
 pub fn delete_category(conn: &Connection, id: i64) -> rusqlite::Result<bool> {
     let affected = conn.execute("DELETE FROM categories WHERE id = ?1", params![id])?;
     Ok(affected > 0)
+}
+
+fn seed_default_categories(conn: &Connection) {
+    // Check if categories already seeded
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM categories", [], |row| row.get(0)).unwrap_or(0);
+    if count > 0 {
+        return;
+    }
+
+    // Built-in categories compatible with the old project (ids 1-30)
+    // The old project uses numeric IDs where some map to known categories.
+    // (id, name, fa_icon)
+    let defaults: &[(i64, &str, &str)] = &[
+        (1, "保险", "fa-shield-halved"),
+        (2, "普通在线消费", "fa-cart-shopping"),
+        (3, "云存储", "fa-cloud"),
+        (4, "设计工具", "fa-palette"),
+        (5, "教育", "fa-graduation-cap"),
+        (6, "娱乐", "fa-masks-theater"),
+        (7, "金融", "fa-landmark"),
+        (8, "食品饮料", "fa-utensils"),
+        (9, "游戏", "fa-gamepad"),
+        (10, "健康", "fa-heart-pulse"),
+        (11, "生活方式", "fa-house"),
+        (12, "杂志和报纸", "fa-newspaper"),
+        (13, "音乐", "fa-music"),
+        (14, "新闻", "fa-rss"),
+        (15, "摄影", "fa-camera"),
+        (16, "生产力工具", "fa-rocket"),
+        (17, "安全", "fa-lock"),
+        (18, "购物", "fa-bag-shopping"),
+        (19, "社交", "fa-users"),
+        (20, "流媒体", "fa-tv"),
+        (21, "运动", "fa-dumbbell"),
+        (22, "电话", "fa-phone"),
+        (23, "交通", "fa-car"),
+        (24, "旅行", "fa-plane"),
+        (25, "实用工具", "fa-wrench"),
+        (26, "VPN/代理", "fa-globe"),
+        (27, "天气", "fa-cloud-sun"),
+        (28, "网络服务", "fa-server"),
+        (29, "开发工具", "fa-code"),
+        (30, "办公软件", "fa-briefcase"),
+    ];
+
+    for (id, name, fa_icon) in defaults {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO categories (id, name, fa_icon) VALUES (?1, ?2, ?3)",
+            params![id, name, fa_icon],
+        );
+    }
 }
 
 // ========== 订阅 ==========
