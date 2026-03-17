@@ -1,5 +1,5 @@
 export function intToHex(color: number | null): string {
-  if (color === null || color === undefined) return "#6366f1";
+  if (color === null || color === undefined) return "#ffffff";
   // Android color int: ARGB format, can be negative
   const unsigned = color >>> 0;
   const r = (unsigned >> 16) & 0xff;
@@ -28,7 +28,7 @@ export function getContrastColor(hexColor: string): string {
 }
 
 export const PRESET_COLORS = [
-  "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e",
+  "#ffffff", "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e",
   "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6",
   "#a855f7", "#d946ef", "#ec4899", "#f43f5e", "#78716c",
   "#1f2937", "#374151", "#6b7280",

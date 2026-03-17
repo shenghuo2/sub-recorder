@@ -71,6 +71,9 @@ export interface Category {
   id: number;
   name: string;
   color: number | null;
+  icon: string | null;
+  icon_mime_type: string | null;
+  fa_icon: string | null;
 }
 
 export interface ApiResponse<T> {

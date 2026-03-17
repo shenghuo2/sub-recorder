@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
+import "@fortawesome/fontawesome-free/css/all.min.css";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,6 +17,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Sub Recorder",
   description: "订阅制服务记账与提醒",
+  icons: {
+    icon: "/app-icon.svg",
+  },
 };
 
 export default function RootLayout({

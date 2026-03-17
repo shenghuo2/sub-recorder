@@ -1,6 +1,14 @@
 import type { ApiResponse, Subscription, SubscriptionDetail, BillingRecord, Category } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456";
+function getApiBase(): string {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem("sub_recorder_api_url");
+    if (stored) return stored;
+  }
+  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456";
+}
+
+const API_BASE = typeof window !== "undefined" ? getApiBase() : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456");
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -34,9 +42,12 @@ export async function createSubscription(data: {
   is_one_time: boolean;
   color?: number | null;
   icon?: string | null;
+  should_be_tinted?: boolean;
   category_id?: number | null;
   notes?: string | null;
   link?: string | null;
+  is_reminder_enabled?: boolean;
+  reminder_type?: string;
 }): Promise<Subscription> {
   return request<Subscription>("/api/subscriptions", {
     method: "POST",
@@ -138,6 +149,13 @@ export async function listCategories(): Promise<Category[]> {
 export async function createCategory(data: { name: string; color?: number | null }): Promise<Category> {
   return request<Category>("/api/categories", {
     method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateCategory(id: number, data: { name?: string; color?: number | null; icon?: string | null; icon_mime_type?: string | null; fa_icon?: string | null }): Promise<Category> {
+  return request<Category>(`/api/categories/${id}`, {
+    method: "PUT",
     body: JSON.stringify(data),
   });
 }

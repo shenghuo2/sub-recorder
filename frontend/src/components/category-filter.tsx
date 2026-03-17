@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Filter } from "lucide-react";
 import type { Category } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { parseFaIcon, getFaClass } from "@/lib/fa-icons";
 
 interface Props {
   categories: Category[];
@@ -69,6 +70,11 @@ export function CategoryFilter({ categories, selectedIds, onChange }: Props) {
                 onChange={() => toggle(cat.id)}
                 className="h-3.5 w-3.5 rounded accent-primary"
               />
+              {cat.fa_icon && (() => {
+                const parsed = parseFaIcon(cat.fa_icon);
+                const cls = parsed ? getFaClass(parsed.name, parsed.style) : `fa-solid ${cat.fa_icon}`;
+                return <i className={`${cls} text-xs text-muted-foreground w-4 text-center`} />;
+              })()}
               <span className={cn(selectedIds.has(cat.id) ? "text-foreground font-medium" : "text-muted-foreground")}>
                 {cat.name}
               </span>

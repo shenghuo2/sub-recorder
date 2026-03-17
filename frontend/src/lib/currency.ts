@@ -34,6 +34,7 @@ const CURRENCY_CONFIG: Record<string, CurrencyConfig> = {
   DKK: { symbol: "kr", precision: 2, pattern: "# !", name: "丹麦克朗" },
   PLN: { symbol: "zł", precision: 2, pattern: "# !", name: "波兰兹罗提" },
   NZD: { symbol: "NZ$", precision: 2, pattern: "!#", name: "新西兰元" },
+  NGN: { symbol: "₦", precision: 2, pattern: "!#", name: "尼日利亚奈拉" },
 };
 
 export const SUPPORTED_CURRENCIES = Object.keys(CURRENCY_CONFIG);
@@ -63,6 +64,16 @@ export function formatCurrencyCompact(amount: number, code: string): string {
   const c = currency(amount, {
     symbol: cfg.symbol,
     precision: isInteger ? 0 : cfg.precision,
+    pattern: cfg.pattern,
+  });
+  return c.format();
+}
+
+export function formatCurrencyWithDecimals(amount: number, code: string, decimals: number): string {
+  const cfg = getCurrencyConfig(code);
+  const c = currency(amount, {
+    symbol: cfg.symbol,
+    precision: decimals,
     pattern: cfg.pattern,
   });
   return c.format();
@@ -106,6 +117,7 @@ const FALLBACK_RATES: Record<string, number> = {
   DKK: 0.94,
   PLN: 0.55,
   NZD: 0.23,
+  NGN: 63.5,
 };
 
 function getCachedRates(): ExchangeRates | null {
