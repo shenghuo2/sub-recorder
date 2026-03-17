@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 
 // ========== 计费周期 ==========
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BillingCycle {
     Daily,
     Weekly,
@@ -15,24 +14,33 @@ pub enum BillingCycle {
     Year1,
     Year2,
     Year3,
+    /// Custom cycle with specified number of days
+    CustomDays(u32),
 }
 
 impl BillingCycle {
-    pub fn to_str(&self) -> &'static str {
+    pub fn to_str(&self) -> String {
         match self {
-            Self::Daily => "daily",
-            Self::Weekly => "weekly",
-            Self::Month1 => "month_1",
-            Self::Month2 => "month_2",
-            Self::Month3 => "month_3",
-            Self::Month6 => "month_6",
-            Self::Year1 => "year_1",
-            Self::Year2 => "year_2",
-            Self::Year3 => "year_3",
+            Self::Daily => "daily".to_string(),
+            Self::Weekly => "weekly".to_string(),
+            Self::Month1 => "month_1".to_string(),
+            Self::Month2 => "month_2".to_string(),
+            Self::Month3 => "month_3".to_string(),
+            Self::Month6 => "month_6".to_string(),
+            Self::Year1 => "year_1".to_string(),
+            Self::Year2 => "year_2".to_string(),
+            Self::Year3 => "year_3".to_string(),
+            Self::CustomDays(days) => format!("custom_days:{}", days),
         }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
+        // Handle custom_days:XX format
+        if s.starts_with("custom_days:") {
+            let days_str = s.strip_prefix("custom_days:")?;
+            let days: u32 = days_str.parse().ok()?;
+            return Some(Self::CustomDays(days));
+        }
         match s {
             "daily" => Some(Self::Daily),
             "weekly" => Some(Self::Weekly),
@@ -60,6 +68,7 @@ impl BillingCycle {
             Self::Year1 => from + Months::new(12),
             Self::Year2 => from + Months::new(24),
             Self::Year3 => from + Months::new(36),
+            Self::CustomDays(days) => from + chrono::Days::new(*days as u64),
         }
     }
 }
@@ -180,6 +189,8 @@ pub struct BillingRecord {
     pub amount: f64,
     /// 实际支付货币（可覆盖订阅默认货币）
     pub currency: String,
+    /// 本次账单的计费周期（可覆盖订阅默认周期）
+    pub billing_cycle: Option<String>,
     pub notes: Option<String>,
     pub paid_at: Option<NaiveDate>,
     pub created_at: String,
@@ -193,6 +204,8 @@ pub struct CreateBillingRecord {
     pub amount: Option<f64>,
     /// 不填则用订阅的默认货币
     pub currency: Option<String>,
+    /// 不填则用订阅的默认周期
+    pub billing_cycle: Option<String>,
     pub notes: Option<String>,
     pub paid_at: Option<NaiveDate>,
 }
@@ -203,6 +216,7 @@ pub struct UpdateBillingRecord {
     pub period_end: Option<NaiveDate>,
     pub amount: Option<f64>,
     pub currency: Option<String>,
+    pub billing_cycle: Option<String>,
     pub notes: Option<String>,
     pub paid_at: Option<NaiveDate>,
 }
@@ -287,14 +301,23 @@ impl<T: Serialize> ApiResponse<T> {
     }
 }
 
+// ========== 有效账单摘要 ==========
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EffectiveRecord {
+    pub amount: f64,
+    pub currency: String,
+    pub billing_cycle: String,
+}
+
 // ========== 订阅列表项（包含有效价格） ==========
 
 #[derive(Debug, Serialize)]
 pub struct SubscriptionWithEffective {
     #[serde(flatten)]
     pub subscription: Subscription,
-    pub effective_price: f64,
-    pub effective_currency: String,
+    /// 所有当前有效的账单记录摘要，空则表示没有账单记录（用默认价格）
+    pub effective_records: Vec<EffectiveRecord>,
 }
 
 // ========== 订阅详情（包含账单记录和有效价格） ==========
@@ -304,7 +327,6 @@ pub struct SubscriptionDetail {
     #[serde(flatten)]
     pub subscription: Subscription,
     pub billing_records: Vec<BillingRecord>,
-    /// 当前周期的实际价格（如果有账单记录则用账单记录的价格，否则用默认价格）
-    pub effective_price: f64,
-    pub effective_currency: String,
+    /// 所有当前有效的账单记录摘要
+    pub effective_records: Vec<EffectiveRecord>,
 }

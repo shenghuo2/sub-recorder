@@ -69,6 +69,9 @@ pub fn init_db(conn: &Connection) {
     let _ = conn.execute_batch("ALTER TABLE categories ADD COLUMN icon_mime_type TEXT DEFAULT 'image/png';");
     let _ = conn.execute_batch("ALTER TABLE categories ADD COLUMN fa_icon TEXT;");
 
+    // Migration: add billing_cycle column to billing_records if not exists
+    let _ = conn.execute_batch("ALTER TABLE billing_records ADD COLUMN billing_cycle TEXT;");
+
     // Seed built-in categories (id 0-30) if they don't exist
     seed_default_categories(conn);
 }
@@ -339,27 +342,35 @@ pub fn list_subscriptions(conn: &Connection) -> rusqlite::Result<Vec<Subscriptio
     let subs: Vec<Subscription> = stmt.query_map([], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
 
     let today = chrono::Local::now().date_naive();
-    // 批量查询所有当前周期的账单记录
+    // 批量查询所有当前有效的账单记录（包含 billing_cycle）
     let mut br_stmt = conn.prepare(
-        "SELECT subscription_id, amount, currency FROM billing_records \
+        "SELECT subscription_id, amount, currency, billing_cycle FROM billing_records \
          WHERE period_start <= ?1 AND period_end > ?1"
     )?;
-    let effective_map: std::collections::HashMap<String, (f64, String)> = br_stmt
-        .query_map(params![today.to_string()], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, String>(2)?))
-        })?
-        .filter_map(|r| r.ok())
-        .map(|(id, amount, currency)| (id, (amount, currency)))
-        .collect();
+    let mut effective_map: std::collections::HashMap<String, Vec<EffectiveRecord>> = std::collections::HashMap::new();
+    let rows = br_stmt.query_map(params![today.to_string()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    for r in rows {
+        if let Ok((sub_id, amount, currency, cycle)) = r {
+            effective_map.entry(sub_id.clone()).or_default().push(EffectiveRecord {
+                amount,
+                currency,
+                billing_cycle: cycle.unwrap_or_default(), // empty string is falsy in JS, frontend falls back to sub default
+            });
+        }
+    }
 
     let result = subs.into_iter().map(|s| {
-        let (ep, ec) = effective_map.get(&s.id)
-            .map(|(a, c)| (*a, c.clone()))
-            .unwrap_or_else(|| (s.price, s.currency.clone()));
+        let effective_records = effective_map.remove(&s.id).unwrap_or_default();
         SubscriptionWithEffective {
             subscription: s,
-            effective_price: ep,
-            effective_currency: ec,
+            effective_records,
         }
     }).collect();
 
@@ -509,14 +520,15 @@ pub fn create_billing_record(conn: &Connection, sub_id: &str, input: &CreateBill
     let currency = input.currency.as_deref().unwrap_or(&sub.currency);
 
     conn.execute(
-        "INSERT INTO billing_records (subscription_id, period_start, period_end, amount, currency, notes, paid_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        "INSERT INTO billing_records (subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         params![
             sub_id,
             input.period_start.to_string(),
             input.period_end.to_string(),
             amount,
             currency,
+            input.billing_cycle,
             input.notes,
             input.paid_at.map(|d| d.to_string()),
         ],
@@ -527,7 +539,7 @@ pub fn create_billing_record(conn: &Connection, sub_id: &str, input: &CreateBill
 
 pub fn get_billing_record(conn: &Connection, id: i64) -> rusqlite::Result<Option<BillingRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, subscription_id, period_start, period_end, amount, currency, notes, paid_at, created_at \
+        "SELECT id, subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, created_at \
          FROM billing_records WHERE id = ?1"
     )?;
     let mut rows = stmt.query_map(params![id], row_to_billing_record)?;
@@ -539,7 +551,7 @@ pub fn get_billing_record(conn: &Connection, id: i64) -> rusqlite::Result<Option
 
 pub fn list_billing_records(conn: &Connection, sub_id: &str) -> rusqlite::Result<Vec<BillingRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, subscription_id, period_start, period_end, amount, currency, notes, paid_at, created_at \
+        "SELECT id, subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, created_at \
          FROM billing_records WHERE subscription_id = ?1 ORDER BY period_start DESC"
     )?;
     let rows = stmt.query_map(params![sub_id], row_to_billing_record)?;
@@ -556,16 +568,18 @@ pub fn update_billing_record(conn: &Connection, id: i64, input: &UpdateBillingRe
     let period_end = input.period_end.unwrap_or(existing.period_end);
     let amount = input.amount.unwrap_or(existing.amount);
     let currency = input.currency.as_deref().unwrap_or(&existing.currency);
+    let billing_cycle = if input.billing_cycle.is_some() { input.billing_cycle.clone() } else { existing.billing_cycle };
     let notes = if input.notes.is_some() { input.notes.clone() } else { existing.notes };
     let paid_at = if input.paid_at.is_some() { input.paid_at } else { existing.paid_at };
 
     conn.execute(
-        "UPDATE billing_records SET period_start=?1, period_end=?2, amount=?3, currency=?4, notes=?5, paid_at=?6 WHERE id=?7",
+        "UPDATE billing_records SET period_start=?1, period_end=?2, amount=?3, currency=?4, billing_cycle=?5, notes=?6, paid_at=?7 WHERE id=?8",
         params![
             period_start.to_string(),
             period_end.to_string(),
             amount,
             currency,
+            billing_cycle,
             notes,
             paid_at.map(|d| d.to_string()),
             id,
@@ -588,9 +602,10 @@ fn row_to_billing_record(row: &rusqlite::Row) -> rusqlite::Result<BillingRecord>
         period_end: parse_date(&row.get::<_, String>(3)?),
         amount: row.get(4)?,
         currency: row.get(5)?,
-        notes: row.get(6)?,
-        paid_at: row.get::<_, Option<String>>(7)?.map(|s| parse_date(&s)),
-        created_at: row.get(8)?,
+        billing_cycle: row.get(6)?,
+        notes: row.get(7)?,
+        paid_at: row.get::<_, Option<String>>(8)?.map(|s| parse_date(&s)),
+        created_at: row.get(9)?,
     })
 }
 
@@ -605,18 +620,19 @@ pub fn get_subscription_detail(conn: &Connection, id: &str) -> rusqlite::Result<
     let records = list_billing_records(conn, id)?;
 
     let today = chrono::Local::now().date_naive();
-    let current_record = records.iter().find(|r| r.period_start <= today && r.period_end > today);
-
-    let (effective_price, effective_currency) = match current_record {
-        Some(r) => (r.amount, r.currency.clone()),
-        None => (sub.price, sub.currency.clone()),
-    };
+    let effective_records: Vec<EffectiveRecord> = records.iter()
+        .filter(|r| r.period_start <= today && r.period_end > today)
+        .map(|r| EffectiveRecord {
+            amount: r.amount,
+            currency: r.currency.clone(),
+            billing_cycle: r.billing_cycle.clone().unwrap_or_else(|| sub.billing_cycle.clone()),
+        })
+        .collect();
 
     Ok(Some(SubscriptionDetail {
         subscription: sub,
         billing_records: records,
-        effective_price,
-        effective_currency,
+        effective_records,
     }))
 }
 
