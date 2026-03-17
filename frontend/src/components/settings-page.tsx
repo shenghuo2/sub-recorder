@@ -23,6 +23,7 @@ const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:345
 const CURRENCY_CONVERT_ENABLED_KEY = "sub_recorder_currency_convert_enabled";
 const CURRENCY_TARGET_KEY = "sub_recorder_currency_target";
 const CURRENCY_DECIMALS_KEY = "sub_recorder_currency_decimals";
+const CYCLE_FORMAT_KEY = "sub_recorder_cycle_format"; // "zh" or "en"
 
 export function getApiBaseUrl(): string {
   if (typeof window === "undefined") return DEFAULT_API_URL;
@@ -45,6 +46,12 @@ export function getCurrencyDecimals(): number {
   return val ? parseInt(val, 10) : 2;
 }
 
+export function getCycleFormat(): "zh" | "en" {
+  if (typeof window === "undefined") return "zh";
+  const val = localStorage.getItem(CYCLE_FORMAT_KEY);
+  return val === "en" ? "en" : "zh";
+}
+
 export function SettingsPage() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [testing, setTesting] = useState(false);
@@ -54,12 +61,14 @@ export function SettingsPage() {
   const [convertEnabled, setConvertEnabled] = useState(false);
   const [targetCurrency, setTargetCurrency] = useState("CNY");
   const [decimals, setDecimals] = useState(2);
+  const [cycleFormat, setCycleFormat] = useState<"zh" | "en">("zh");
 
   useEffect(() => {
     setApiUrl(getApiBaseUrl());
     setConvertEnabled(getCurrencyConvertEnabled());
     setTargetCurrency(getTargetCurrency());
     setDecimals(getCurrencyDecimals());
+    setCycleFormat(getCycleFormat());
   }, []);
 
   const handleSave = () => {
@@ -202,6 +211,26 @@ export function SettingsPage() {
                 <SelectItem value="1">1 位小数</SelectItem>
                 <SelectItem value="2">2 位小数</SelectItem>
                 <SelectItem value="3">3 位小数</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Cycle Format */}
+          <div className="space-y-2">
+            <Label className="text-sm">周期单位格式</Label>
+            <Select
+              value={cycleFormat}
+              onValueChange={(val: "zh" | "en") => {
+                setCycleFormat(val);
+                localStorage.setItem(CYCLE_FORMAT_KEY, val);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="zh">中文 (¥99/月, ¥599/年)</SelectItem>
+                <SelectItem value="en">英文 (¥99/mo, ¥599/y)</SelectItem>
               </SelectContent>
             </Select>
           </div>

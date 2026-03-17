@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react";
 import type { Subscription } from "@/lib/types";
+import { getBillingCycleShort, cycleToMonths } from "@/lib/types";
 import { intToHex, getContrastColor } from "@/lib/color";
 import { formatCurrencyCompact, formatCurrencyWithDecimals, convertCurrency, fetchExchangeRates } from "@/lib/currency";
 import { Badge } from "@/components/ui/badge";
 import { Pause } from "lucide-react";
-import { getCurrencyConvertEnabled, getTargetCurrency, getCurrencyDecimals } from "@/components/settings-page";
+import { getCurrencyConvertEnabled, getTargetCurrency, getCurrencyDecimals, getCycleFormat } from "@/components/settings-page";
 
 interface Props {
   subscription: Subscription;
@@ -26,14 +27,44 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
   const convertEnabled = getCurrencyConvertEnabled();
   const targetCurrency = getTargetCurrency();
   const decimals = getCurrencyDecimals();
-  
-  const effectiveCurrency = sub.effective_currency ?? sub.currency;
-  const effectivePrice = sub.effective_price ?? sub.price;
-  const needsConversion = convertEnabled && effectiveCurrency !== targetCurrency && exchangeRates;
-  
+
+  // Compute display price from effective_records
+  // If there are effective records, sum them all normalized to month;
+  // otherwise fall back to subscription default
+  const records = sub.effective_records ?? [];
+  const hasRecords = records.length > 0;
+
+  // For display: if only 1 record, show its raw price + cycle;
+  // if multiple, show sum normalized to /mo
+  let displayPrice: number;
+  let displayCurrency: string;
+  let displayCycle: string;
+
+  if (!hasRecords) {
+    displayPrice = sub.price;
+    displayCurrency = sub.currency;
+    displayCycle = sub.billing_cycle;
+  } else if (records.length === 1) {
+    displayPrice = records[0].amount;
+    displayCurrency = records[0].currency;
+    displayCycle = records[0].billing_cycle || sub.billing_cycle;
+  } else {
+    // Multiple records: normalize all to monthly and sum (converted to same currency)
+    displayCycle = "month_1";
+    displayCurrency = sub.currency; // normalize to subscription's base currency
+    displayPrice = records.reduce((sum, r) => {
+      const months = cycleToMonths(r.billing_cycle || sub.billing_cycle);
+      const amountInBase = exchangeRates
+        ? (convertCurrency(r.amount, r.currency, sub.currency, exchangeRates, "CNY") ?? r.amount)
+        : r.amount;
+      return sum + amountInBase / months;
+    }, 0);
+  }
+
+  const needsConversion = convertEnabled && displayCurrency !== targetCurrency && exchangeRates;
   let convertedAmount: number | null = null;
   if (needsConversion && exchangeRates) {
-    convertedAmount = convertCurrency(effectivePrice, effectiveCurrency, targetCurrency, exchangeRates, "CNY");
+    convertedAmount = convertCurrency(displayPrice, displayCurrency, targetCurrency, exchangeRates, "CNY");
   }
 
   const nextDateStr = sub.next_bill_date
@@ -52,7 +83,7 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
 
   return (
     <div
-      className={`flex items-center gap-4 rounded-xl p-4 cursor-pointer transition-transform hover:scale-[1.01] active:scale-[0.99] shadow-sm ${isExpired ? "opacity-60" : ""}`}
+      className={`flex items-center gap-3 md:gap-4 rounded-xl p-3 md:p-4 cursor-pointer transition-transform hover:scale-[1.01] active:scale-[0.99] shadow-sm ${isExpired ? "opacity-60" : ""}`}
       style={{ backgroundColor: bgColor, color: textColor }}
       onClick={onClick}
     >
@@ -93,14 +124,17 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
       {/* Right side: price + next payment / expired */}
       <div className="text-right shrink-0">
         <p className="font-bold text-lg">
-          {formatCurrencyCompact(effectivePrice, effectiveCurrency)}
+          {formatCurrencyCompact(displayPrice, displayCurrency)}
+          {!sub.is_one_time && (
+            <span className="text-sm font-medium opacity-70">{getBillingCycleShort(displayCycle, getCycleFormat())}</span>
+          )}
           {convertedAmount !== null && (
-            <span className="text-sm font-normal opacity-70 ml-1">
+            <span className="opacity-60 ml-1">
               ≈ {formatCurrencyWithDecimals(convertedAmount, targetCurrency, decimals)}
             </span>
           )}
         </p>
-        {sub.effective_price != null && (sub.effective_price !== sub.price || sub.effective_currency !== sub.currency) && (
+        {hasRecords && (displayPrice !== sub.price || displayCurrency !== sub.currency) && (
           <p className="text-xs opacity-50 line-through">
             {formatCurrencyCompact(sub.price, sub.currency)}
           </p>

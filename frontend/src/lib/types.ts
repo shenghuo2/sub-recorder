@@ -22,8 +22,13 @@ export interface Subscription {
   reminder_type: string | null;
   created_at: string;
   updated_at: string;
-  effective_price: number;
-  effective_currency: string;
+  effective_records: EffectiveRecord[];
+}
+
+export interface EffectiveRecord {
+  amount: number;
+  currency: string;
+  billing_cycle: string;
 }
 
 export interface SubscriptionDetail {
@@ -51,8 +56,7 @@ export interface SubscriptionDetail {
   created_at: string;
   updated_at: string;
   billing_records: BillingRecord[];
-  effective_price: number;
-  effective_currency: string;
+  effective_records: EffectiveRecord[];
 }
 
 export interface BillingRecord {
@@ -62,6 +66,7 @@ export interface BillingRecord {
   period_end: string;
   amount: number;
   currency: string;
+  billing_cycle: string | null;
   notes: string | null;
   paid_at: string | null;
   created_at: string;
@@ -82,7 +87,7 @@ export interface ApiResponse<T> {
   error: string | null;
 }
 
-export const BILLING_CYCLES: Record<string, string> = {
+export const BILLING_CYCLE_LABELS: Record<string, string> = {
   daily: "每天",
   weekly: "每周",
   month_1: "每月",
@@ -92,7 +97,95 @@ export const BILLING_CYCLES: Record<string, string> = {
   year_1: "每年",
   year_2: "每2年",
   year_3: "每3年",
+  custom_days: "自定义",
 };
+
+export const BILLING_CYCLE_SHORT_ZH: Record<string, string> = {
+  daily: "/天",
+  weekly: "/周",
+  month_1: "/月",
+  month_2: "/2月",
+  month_3: "/季",
+  month_6: "/半年",
+  year_1: "/年",
+  year_2: "/2年",
+  year_3: "/3年",
+};
+
+export const BILLING_CYCLE_SHORT_EN: Record<string, string> = {
+  daily: "/d",
+  weekly: "/w",
+  month_1: "/mo",
+  month_2: "/2mo",
+  month_3: "/q",
+  month_6: "/6mo",
+  year_1: "/y",
+  year_2: "/2y",
+  year_3: "/3y",
+};
+
+/** Parse custom_days cycle string like "custom_days:30" and return the number of days */
+export function parseCustomDays(cycle: string): number | null {
+  if (cycle.startsWith("custom_days:")) {
+    const days = parseInt(cycle.split(":")[1], 10);
+    return isNaN(days) ? null : days;
+  }
+  return null;
+}
+
+/** Get short label for billing cycle, handling custom_days format */
+export function getBillingCycleShort(cycle: string, format: "zh" | "en" = "zh"): string {
+  const customDays = parseCustomDays(cycle);
+  if (customDays !== null) {
+    return format === "en" ? `/${customDays}d` : `/${customDays}天`;
+  }
+  return format === "en" 
+    ? (BILLING_CYCLE_SHORT_EN[cycle] || "") 
+    : (BILLING_CYCLE_SHORT_ZH[cycle] || "");
+}
+
+/** Get display label for billing cycle, handling custom_days format */
+export function getBillingCycleLabel(cycle: string): string {
+  const customDays = parseCustomDays(cycle);
+  if (customDays !== null) {
+    return `每${customDays}天`;
+  }
+  return BILLING_CYCLE_LABELS[cycle] || cycle;
+}
+
+export function cycleToMonths(cycle: string): number {
+  // Handle custom_days:XX format
+  const customDays = parseCustomDays(cycle);
+  if (customDays !== null) {
+    return customDays / 30;
+  }
+  switch (cycle) {
+    case "daily": return 1 / 30;
+    case "weekly": return 7 / 30;
+    case "month_1": return 1;
+    case "month_2": return 2;
+    case "month_3": return 3;
+    case "month_6": return 6;
+    case "year_1": return 12;
+    case "year_2": return 24;
+    case "year_3": return 36;
+    default: return 1;
+  }
+}
+
+/** List of standard billing cycles for select dropdowns */
+export const BILLING_CYCLES = [
+  "daily",
+  "weekly", 
+  "month_1",
+  "month_2",
+  "month_3",
+  "month_6",
+  "year_1",
+  "year_2",
+  "year_3",
+  "custom_days",
+] as const;
 
 export { SUPPORTED_CURRENCIES as CURRENCIES, getSymbol, formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 

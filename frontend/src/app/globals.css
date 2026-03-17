@@ -128,6 +128,10 @@
   }
 }
 
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 @keyframes svg-color-cycle {
   0%   { filter: invert(70%) sepia(50%) saturate(500%) hue-rotate(90deg); }
   25%  { filter: invert(50%) sepia(80%) saturate(600%) hue-rotate(200deg); }

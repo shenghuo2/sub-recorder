@@ -120,6 +120,7 @@ export async function createBillingRecord(subId: string, data: {
   period_end: string;
   amount?: number;
   currency?: string;
+  billing_cycle?: string;
   notes?: string | null;
   paid_at?: string | null;
 }): Promise<BillingRecord> {

@@ -31,7 +31,15 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { Subscription, SubscriptionDetail, BillingRecord } from "@/lib/types";
-import { BILLING_CYCLES } from "@/lib/types";
+import { BILLING_CYCLES, BILLING_CYCLE_LABELS, parseCustomDays, getBillingCycleLabel, getBillingCycleShort } from "@/lib/types";
+import { getCycleFormat } from "@/components/settings-page";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatCurrencyCompact } from "@/lib/currency";
 import { intToHex, getContrastColor } from "@/lib/color";
 import { IconUpload } from "@/components/icon-upload";
@@ -59,12 +67,15 @@ export function SubscriptionDetailSheet({
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeDate, setResumeDate] = useState("");
 
-  // 添加账单记录 dialog
+  // 添加/编辑账单记录 dialog
   const [billingOpen, setBillingOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<BillingRecord | null>(null);
   const [brStart, setBrStart] = useState("");
   const [brEnd, setBrEnd] = useState("");
   const [brAmount, setBrAmount] = useState("");
   const [brCurrency, setBrCurrency] = useState("");
+  const [brCycle, setBrCycle] = useState("__default__");
+  const [brCustomEndDate, setBrCustomEndDate] = useState("");
   const [brNotes, setBrNotes] = useState("");
   const [brPaidAt, setBrPaidAt] = useState("");
 
@@ -135,15 +146,38 @@ export function SubscriptionDetailSheet({
       return;
     }
     try {
-      await api.createBillingRecord(detail.id, {
-        period_start: brStart,
-        period_end: brEnd,
-        amount: brAmount ? Number(brAmount) : undefined,
-        currency: brCurrency || undefined,
-        notes: brNotes || null,
-        paid_at: brPaidAt || null,
-      });
-      toast.success("账单记录已添加");
+      // Construct billing_cycle value - use custom_days:XX format if custom
+      let effectiveCycle: string | undefined = brCycle === "__default__" ? undefined : (brCycle || undefined);
+      if (brCycle === "custom_days" && brCustomEndDate && brStart) {
+        const start = new Date(brStart);
+        const end = new Date(brCustomEndDate);
+        const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+        effectiveCycle = `custom_days:${diffDays}`;
+      }
+      
+      if (editingRecord) {
+        await api.updateBillingRecord(editingRecord.id, {
+          period_start: brStart,
+          period_end: brEnd,
+          amount: brAmount ? Number(brAmount) : undefined,
+          currency: brCurrency || undefined,
+          billing_cycle: effectiveCycle,
+          notes: brNotes || null,
+          paid_at: brPaidAt || null,
+        });
+        toast.success("账单记录已更新");
+      } else {
+        await api.createBillingRecord(detail.id, {
+          period_start: brStart,
+          period_end: brEnd,
+          amount: brAmount ? Number(brAmount) : undefined,
+          currency: brCurrency || undefined,
+          billing_cycle: effectiveCycle,
+          notes: brNotes || null,
+          paid_at: brPaidAt || null,
+        });
+        toast.success("账单记录已添加");
+      }
       setBillingOpen(false);
       loadDetail();
       onRefresh();
@@ -167,12 +201,43 @@ export function SubscriptionDetailSheet({
   const openAddBilling = () => {
     if (!detail) return;
     const today = new Date().toISOString().split("T")[0];
+    setEditingRecord(null);
     setBrStart(detail.billing_date);
     setBrEnd(detail.next_bill_date || today);
     setBrAmount("");
     setBrCurrency(detail.currency);
+    setBrCycle("__default__");
+    setBrCustomEndDate("");
     setBrNotes("");
     setBrPaidAt(today);
+    setBillingOpen(true);
+  };
+
+  const openEditBilling = (record: BillingRecord) => {
+    if (!detail) return;
+    setEditingRecord(record);
+    setBrStart(record.period_start);
+    setBrEnd(record.period_end);
+    setBrAmount(String(record.amount));
+    setBrCurrency(record.currency);
+    // Handle billing_cycle
+    if (record.billing_cycle) {
+      const parsedDays = parseCustomDays(record.billing_cycle);
+      if (parsedDays !== null) {
+        setBrCycle("custom_days");
+        const bd = new Date(record.period_start);
+        bd.setDate(bd.getDate() + parsedDays);
+        setBrCustomEndDate(bd.toISOString().split("T")[0]);
+      } else {
+        setBrCycle(record.billing_cycle);
+        setBrCustomEndDate("");
+      }
+    } else {
+      setBrCycle("__default__");
+      setBrCustomEndDate("");
+    }
+    setBrNotes(record.notes || "");
+    setBrPaidAt(record.paid_at || "");
     setBillingOpen(true);
   };
 
@@ -194,7 +259,7 @@ export function SubscriptionDetailSheet({
   return (
     <>
       <Sheet open={!!subscriptionId} onOpenChange={(open) => !open && onClose()}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto p-0">
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto p-0 pb-16 md:pb-0">
           {loading || !detail ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               <SheetHeader className="sr-only"><SheetTitle>加载中</SheetTitle></SheetHeader>
@@ -221,21 +286,39 @@ export function SubscriptionDetailSheet({
                         {detail.name}
                       </SheetTitle>
                       <p className="text-sm opacity-80">
-                        {BILLING_CYCLES[detail.billing_cycle] || detail.billing_cycle}
+                        {getBillingCycleLabel(detail.billing_cycle)}
                         {detail.is_one_time && " · 一次性"}
                       </p>
                     </div>
                   </div>
                 </SheetHeader>
 
-                <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-3xl font-bold">
-                    {formatCurrencyCompact(detail.effective_price, detail.effective_currency)}
-                  </span>
-                  {(detail.effective_price !== detail.price ||
-                    detail.effective_currency !== detail.currency) && (
-                    <span className="text-sm opacity-70 ml-2 line-through">
+                <div className="mt-4 flex items-baseline gap-1 flex-wrap">
+                  {(detail.effective_records ?? []).length > 0 ? (
+                    <>
+                      {detail.effective_records.map((r, i) => (
+                        <span key={i} className="text-3xl font-bold">
+                          {i > 0 && <span className="text-lg opacity-50 mx-1">+</span>}
+                          {formatCurrencyCompact(r.amount, r.currency)}
+                          {!detail.is_one_time && (
+                            <span className="text-sm font-medium opacity-70">
+                              {getBillingCycleShort(r.billing_cycle || detail.billing_cycle, getCycleFormat())}
+                            </span>
+                          )}
+                        </span>
+                      ))}
+                      <span className="text-sm opacity-70 ml-2 line-through">
+                        {formatCurrencyCompact(detail.price, detail.currency)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-3xl font-bold">
                       {formatCurrencyCompact(detail.price, detail.currency)}
+                      {!detail.is_one_time && (
+                        <span className="text-sm font-medium opacity-70">
+                          {getBillingCycleShort(detail.billing_cycle, getCycleFormat())}
+                        </span>
+                      )}
                     </span>
                   )}
                 </div>
@@ -365,9 +448,12 @@ export function SubscriptionDetailSheet({
                             <span className="font-medium">
                               {formatCurrencyCompact(record.amount, record.currency)}
                             </span>
+                            <span className="text-xs text-muted-foreground">
+                              {record.billing_cycle ? getBillingCycleLabel(record.billing_cycle) : "默认周期"}
+                            </span>
                             {record.notes && (
                               <span className="text-xs text-muted-foreground">
-                                {record.notes}
+                                · {record.notes}
                               </span>
                             )}
                           </div>
@@ -376,14 +462,24 @@ export function SubscriptionDetailSheet({
                             {record.period_start} → {record.period_end}
                           </p>
                         </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => handleDeleteBilling(record)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            onClick={() => openEditBilling(record)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => handleDeleteBilling(record)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -450,7 +546,7 @@ export function SubscriptionDetailSheet({
       <Dialog open={billingOpen} onOpenChange={setBillingOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>添加账单记录</DialogTitle>
+            <DialogTitle>{editingRecord ? "编辑账单记录" : "添加账单记录"}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid grid-cols-2 gap-2">
@@ -492,6 +588,33 @@ export function SubscriptionDetailSheet({
               </div>
             </div>
             <div className="grid gap-2">
+              <Label>计费周期（留空用默认周期）</Label>
+              <div className="flex gap-2">
+                <Select value={brCycle} onValueChange={setBrCycle}>
+                  <SelectTrigger className={brCycle === "custom_days" ? "w-[120px]" : "w-full"}>
+                    <SelectValue placeholder={detail ? getBillingCycleLabel(detail.billing_cycle) : "默认"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">默认</SelectItem>
+                    {BILLING_CYCLES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {BILLING_CYCLE_LABELS[c]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {brCycle === "custom_days" && (
+                  <div className="flex items-center gap-1 flex-1">
+                    <Input
+                      type="date"
+                      value={brCustomEndDate}
+                      onChange={(e) => setBrCustomEndDate(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="grid gap-2">
               <Label>付款日期</Label>
               <Input
                 type="date"
@@ -512,7 +635,7 @@ export function SubscriptionDetailSheet({
             <Button variant="outline" onClick={() => setBillingOpen(false)}>
               取消
             </Button>
-            <Button onClick={handleAddBilling}>添加</Button>
+            <Button onClick={handleAddBilling}>{editingRecord ? "保存" : "添加"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
