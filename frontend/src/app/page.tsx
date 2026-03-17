@@ -13,6 +13,8 @@ import { NavSidebar, type NavPage } from "@/components/nav-sidebar";
 import { SubscriptionCalendar } from "@/components/subscription-calendar";
 import { CategoryFilter } from "@/components/category-filter";
 import { SortOptions, type SortField } from "@/components/sort-options";
+import { CategoryPanel } from "@/components/category-panel";
+import { SettingsPage } from "@/components/settings-page";
 import { fetchExchangeRates, convertCurrency } from "@/lib/currency";
 
 export default function Home() {
@@ -157,11 +159,9 @@ export default function Home() {
     return list;
   }, [subscriptions, selectedDate, selectedCategoryIds, sortBy, sortReversed, today]);
 
-  return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* Left Navigation */}
-      <NavSidebar current={navPage} onChange={setNavPage} />
-
+  // Render the subscriptions page content
+  const renderSubscriptionsPage = () => (
+    <>
       {/* Sidebar: Calendar + Filter + Sort */}
       <div className="w-72 shrink-0 border-r bg-muted/10 overflow-y-auto">
         <div className="p-4 space-y-4">
@@ -250,12 +250,53 @@ export default function Home() {
                   key={sub.id}
                   subscription={sub}
                   onClick={() => setDetailSubId(sub.id)}
+                  exchangeRates={rates}
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Right: Category Panel */}
+      <div className="w-60 shrink-0 border-l bg-muted/10 overflow-y-auto">
+        <CategoryPanel
+          categories={categories}
+          subscriptions={subscriptions}
+          selectedCategoryIds={selectedCategoryIds}
+          onFilterChange={setSelectedCategoryIds}
+          onRefresh={refresh}
+        />
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex h-screen bg-background overflow-hidden">
+      {/* Left Navigation */}
+      <NavSidebar current={navPage} onChange={setNavPage} />
+
+      {navPage === "subscriptions" && renderSubscriptionsPage()}
+
+      {navPage === "categories" && (
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-lg mx-auto py-6">
+            <CategoryPanel
+              categories={categories}
+              subscriptions={subscriptions}
+              selectedCategoryIds={selectedCategoryIds}
+              onFilterChange={setSelectedCategoryIds}
+              onRefresh={refresh}
+            />
+          </div>
+        </div>
+      )}
+
+      {navPage === "settings" && (
+        <div className="flex-1 overflow-y-auto">
+          <SettingsPage />
+        </div>
+      )}
 
       {/* 创建/编辑弹窗 */}
       <SubscriptionDialog

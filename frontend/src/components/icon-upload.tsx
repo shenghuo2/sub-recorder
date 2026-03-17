@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,14 +12,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Upload, Link, Image as ImageIcon } from "lucide-react";
+import { Upload, Link, Image as ImageIcon, X } from "lucide-react";
 import * as api from "@/lib/api";
 
 interface Props {
-  subscriptionId: string;
+  subscriptionId?: string;
   currentIcon: string | null;
   currentMimeType: string | null;
-  onUpdated: () => void;
+  onUpdated: (icon?: string, mimeType?: string) => void;
   tintFilter?: string;
 }
 
@@ -44,30 +44,96 @@ export function IconUpload({ subscriptionId, currentIcon, currentMimeType, onUpd
   const [url, setUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
+  const [previewMime, setPreviewMime] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
 
   const iconSrc = currentIcon
     ? `data:${currentMimeType || "image/png"};base64,${currentIcon}`
     : null;
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = useCallback((file: File) => {
     if (file.size > 512 * 1024) {
       toast.error("图片不能超过 512KB");
       return;
     }
 
+    const mime = getMimeFromFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
       setPreview(result);
+      setPreviewMime(mime);
     };
     reader.readAsDataURL(file);
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
   };
 
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("请拖入图片文件");
+      return;
+    }
+
+    processFile(file);
+  }, [processFile]);
+
   const handleUploadFile = async () => {
+    // If we have a preview from drag-drop or file select, use that
+    if (preview && previewMime) {
+      const b64 = preview.split(",")[1];
+      
+      if (subscriptionId) {
+        // Edit mode: upload to server
+        setUploading(true);
+        try {
+          await api.uploadIcon(subscriptionId, b64, previewMime);
+          toast.success("图标已更新");
+          setDialogOpen(false);
+          setPreview(null);
+          setPreviewMime(null);
+          onUpdated(b64, previewMime);
+        } catch (e: unknown) {
+          toast.error(e instanceof Error ? e.message : "上传失败");
+        } finally {
+          setUploading(false);
+        }
+      } else {
+        // Create mode: just pass the data back
+        onUpdated(b64, previewMime);
+        setDialogOpen(false);
+        setPreview(null);
+        setPreviewMime(null);
+      }
+      return;
+    }
+
+    // Fallback to file input
     const file = fileRef.current?.files?.[0];
     if (!file) {
       toast.error("请选择文件");
@@ -81,11 +147,17 @@ export function IconUpload({ subscriptionId, currentIcon, currentMimeType, onUpd
       reader.onload = async () => {
         const dataUrl = reader.result as string;
         const b64 = dataUrl.split(",")[1];
-        await api.uploadIcon(subscriptionId, b64, mime);
-        toast.success("图标已更新");
+        
+        if (subscriptionId) {
+          await api.uploadIcon(subscriptionId, b64, mime);
+          toast.success("图标已更新");
+          onUpdated(b64, mime);
+        } else {
+          onUpdated(b64, mime);
+        }
         setDialogOpen(false);
         setPreview(null);
-        onUpdated();
+        setPreviewMime(null);
       };
       reader.readAsDataURL(file);
     } catch (e: unknown) {
@@ -98,6 +170,30 @@ export function IconUpload({ subscriptionId, currentIcon, currentMimeType, onUpd
   const handleUploadUrl = async () => {
     if (!url.trim()) {
       toast.error("请输入图片 URL");
+      return;
+    }
+
+    if (!subscriptionId) {
+      // Create mode: fetch the image and convert to base64
+      setUploading(true);
+      try {
+        const resp = await fetch(url.trim());
+        const blob = await resp.blob();
+        const mime = blob.type || "image/png";
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const b64 = dataUrl.split(",")[1];
+          onUpdated(b64, mime);
+          setDialogOpen(false);
+          setUrl("");
+        };
+        reader.readAsDataURL(blob);
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : "获取失败");
+      } finally {
+        setUploading(false);
+      }
       return;
     }
 
@@ -157,8 +253,41 @@ export function IconUpload({ subscriptionId, currentIcon, currentMimeType, onUpd
 
           {mode === "file" ? (
             <div className="space-y-3">
+              {/* Drag-drop zone */}
+              <div
+                ref={dropRef}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                  isDragging
+                    ? "border-primary bg-primary/10"
+                    : "border-muted-foreground/30 hover:border-primary/50"
+                }`}
+              >
+                {preview ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <img src={preview} alt="preview" className="h-20 w-20 object-contain" />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => { setPreview(null); setPreviewMime(null); }}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      清除
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      拖拽图片到此处，或点击下方选择
+                    </p>
+                  </>
+                )}
+              </div>
+
               <div className="grid gap-2">
-                <Label>选择图片</Label>
                 <input
                   ref={fileRef}
                   type="file"
@@ -170,15 +299,11 @@ export function IconUpload({ subscriptionId, currentIcon, currentMimeType, onUpd
                   支持 PNG、JPG、SVG、WebP，最大 512KB
                 </p>
               </div>
-              {preview && (
-                <div className="flex justify-center p-4 bg-muted/50 rounded-lg">
-                  <img src={preview} alt="preview" className="h-16 w-16 object-contain" />
-                </div>
-              )}
+
               <DialogFooter>
                 <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
-                <Button onClick={handleUploadFile} disabled={uploading}>
-                  {uploading ? "上传中..." : "上传"}
+                <Button onClick={handleUploadFile} disabled={uploading || (!preview && !fileRef.current?.files?.length)}>
+                  {uploading ? "上传中..." : "确定"}
                 </Button>
               </DialogFooter>
             </div>

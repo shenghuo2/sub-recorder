@@ -25,6 +25,8 @@ import { SUPPORTED_CURRENCIES as CURRENCIES, getSymbol } from "@/lib/currency";
 import { PRESET_COLORS } from "@/lib/color";
 import { intToHex, hexToInt } from "@/lib/color";
 import * as api from "@/lib/api";
+import { parseFaIcon, getFaClass } from "@/lib/fa-icons";
+import { IconUpload } from "@/components/icon-upload";
 
 interface Props {
   open: boolean;
@@ -50,12 +52,16 @@ export function SubscriptionDialog({
   const [billingDate, setBillingDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [isOneTime, setIsOneTime] = useState(false);
-  const [color, setColor] = useState("#6366f1");
+  const [color, setColor] = useState("#ffffff");
   const [categoryId, setCategoryId] = useState<string>("");
   const [shouldBeTinted, setShouldBeTinted] = useState(false);
   const [notes, setNotes] = useState("");
   const [link, setLink] = useState("");
+  const [isReminderEnabled, setIsReminderEnabled] = useState(true);
+  const [reminderType, setReminderType] = useState("one_day");
   const [saving, setSaving] = useState(false);
+  const [icon, setIcon] = useState<string | null>(null);
+  const [iconMimeType, setIconMimeType] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -69,9 +75,13 @@ export function SubscriptionDialog({
         setIsOneTime(subscription.is_one_time);
         setColor(intToHex(subscription.color));
         setShouldBeTinted(subscription.should_be_tinted ?? false);
-        setCategoryId(subscription.category_id ? String(subscription.category_id) : "");
+        setCategoryId(subscription.category_id ? String(subscription.category_id) : "__none__");
         setNotes(subscription.notes || "");
         setLink(subscription.link || "");
+        setIsReminderEnabled(subscription.is_reminder_enabled);
+        setReminderType(subscription.reminder_type || "one_day");
+        setIcon(subscription.icon || null);
+        setIconMimeType(subscription.icon_mime_type || null);
       } else {
         setName("");
         setPrice("");
@@ -80,11 +90,15 @@ export function SubscriptionDialog({
         setBillingDate(new Date().toISOString().split("T")[0]);
         setEndDate("");
         setIsOneTime(false);
-        setColor("#6366f1");
+        setColor("#ffffff");
         setShouldBeTinted(false);
-        setCategoryId("");
+        setCategoryId("__none__");
         setNotes("");
         setLink("");
+        setIsReminderEnabled(true);
+        setReminderType("one_day");
+        setIcon(null);
+        setIconMimeType(null);
       }
     }
   }, [open, subscription]);
@@ -115,16 +129,26 @@ export function SubscriptionDialog({
         is_one_time: isOneTime,
         color: hexToInt(color),
         should_be_tinted: shouldBeTinted,
-        category_id: categoryId ? Number(categoryId) : null,
+        category_id: categoryId && categoryId !== "__none__" ? Number(categoryId) : null,
         notes: notes.trim() || null,
         link: link.trim() || null,
+        is_reminder_enabled: isReminderEnabled,
+        reminder_type: reminderType,
       };
 
       if (isEdit) {
         await api.updateSubscription(subscription!.id, data);
+        // Upload icon if changed
+        if (icon && iconMimeType && icon !== subscription?.icon) {
+          await api.uploadIcon(subscription!.id, icon, iconMimeType);
+        }
         toast.success("已更新");
       } else {
-        await api.createSubscription(data);
+        const created = await api.createSubscription(data);
+        // Upload icon for new subscription
+        if (icon && iconMimeType && created?.id) {
+          await api.uploadIcon(created.id, icon, iconMimeType);
+        }
         toast.success("已创建");
       }
       onSaved();
@@ -143,15 +167,31 @@ export function SubscriptionDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
-          {/* 名称 */}
-          <div className="grid gap-2">
-            <Label htmlFor="name">名称</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="如：Netflix"
-            />
+          {/* 图标 + 名称 */}
+          <div className="flex gap-4 items-start">
+            <div className="shrink-0">
+              <Label className="text-xs text-muted-foreground mb-1 block">图标</Label>
+              <IconUpload
+                subscriptionId={subscription?.id}
+                currentIcon={icon}
+                currentMimeType={iconMimeType}
+                onUpdated={(newIcon, newMime) => {
+                  if (newIcon && newMime) {
+                    setIcon(newIcon);
+                    setIconMimeType(newMime);
+                  }
+                }}
+              />
+            </div>
+            <div className="flex-1 grid gap-2">
+              <Label htmlFor="name">名称</Label>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="如：Netflix"
+              />
+            </div>
           </div>
 
           {/* 价格 + 货币 */}
@@ -299,12 +339,48 @@ export function SubscriptionDialog({
                   <SelectValue placeholder="无分类" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">无分类</SelectItem>
-                  {categories.map((cat) => (
-                    <SelectItem key={cat.id} value={String(cat.id)}>
-                      {cat.name}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="__none__">无分类</SelectItem>
+                  {categories.map((cat) => {
+                    const parsed = cat.fa_icon ? parseFaIcon(cat.fa_icon) : null;
+                    const iconCls = parsed ? getFaClass(parsed.name, parsed.style) : (cat.fa_icon ? `fa-solid ${cat.fa_icon}` : null);
+                    return (
+                      <SelectItem key={cat.id} value={String(cat.id)}>
+                        <span className="flex items-center gap-2">
+                          {iconCls && <i className={`${iconCls} text-xs text-muted-foreground`} />}
+                          {cat.name}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* 提醒 */}
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="isReminderEnabled"
+              checked={isReminderEnabled}
+              onChange={(e) => setIsReminderEnabled(e.target.checked)}
+              className="h-4 w-4 rounded"
+            />
+            <Label htmlFor="isReminderEnabled">到期提醒</Label>
+          </div>
+
+          {isReminderEnabled && (
+            <div className="grid gap-2">
+              <Label>提醒时间</Label>
+              <Select value={reminderType} onValueChange={setReminderType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="same_day">当天</SelectItem>
+                  <SelectItem value="one_day">提前 1 天</SelectItem>
+                  <SelectItem value="three_days">提前 3 天</SelectItem>
+                  <SelectItem value="one_week">提前 1 周</SelectItem>
                 </SelectContent>
               </Select>
             </div>

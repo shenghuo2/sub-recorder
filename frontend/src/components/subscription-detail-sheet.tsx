@@ -213,7 +213,7 @@ export function SubscriptionDetailSheet({
                       subscriptionId={detail.id}
                       currentIcon={detail.icon}
                       currentMimeType={detail.icon_mime_type}
-                      onUpdated={loadDetail}
+                      onUpdated={() => { loadDetail(); onRefresh(); }}
                       tintFilter={tintFilter}
                     />
                     <div className="flex-1">

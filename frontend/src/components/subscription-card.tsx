@@ -1,23 +1,40 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import type { Subscription } from "@/lib/types";
 import { intToHex, getContrastColor } from "@/lib/color";
-import { formatCurrencyCompact } from "@/lib/currency";
+import { formatCurrencyCompact, formatCurrencyWithDecimals, convertCurrency, fetchExchangeRates } from "@/lib/currency";
 import { Badge } from "@/components/ui/badge";
 import { Pause } from "lucide-react";
+import { getCurrencyConvertEnabled, getTargetCurrency, getCurrencyDecimals } from "@/components/settings-page";
 
 interface Props {
   subscription: Subscription;
   onClick: () => void;
+  exchangeRates?: Record<string, number>;
 }
 
-export function SubscriptionCard({ subscription: sub, onClick }: Props) {
+export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: Props) {
   const bgColor = intToHex(sub.color);
   const textColor = getContrastColor(bgColor);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const isExpired = sub.end_date ? new Date(sub.end_date) < today : false;
+
+  // Currency conversion
+  const convertEnabled = getCurrencyConvertEnabled();
+  const targetCurrency = getTargetCurrency();
+  const decimals = getCurrencyDecimals();
+  
+  const effectiveCurrency = sub.effective_currency ?? sub.currency;
+  const effectivePrice = sub.effective_price ?? sub.price;
+  const needsConversion = convertEnabled && effectiveCurrency !== targetCurrency && exchangeRates;
+  
+  let convertedAmount: number | null = null;
+  if (needsConversion && exchangeRates) {
+    convertedAmount = convertCurrency(effectivePrice, effectiveCurrency, targetCurrency, exchangeRates, "CNY");
+  }
 
   const nextDateStr = sub.next_bill_date
     ? new Date(sub.next_bill_date).toLocaleDateString("zh-CN", {
@@ -76,7 +93,12 @@ export function SubscriptionCard({ subscription: sub, onClick }: Props) {
       {/* Right side: price + next payment / expired */}
       <div className="text-right shrink-0">
         <p className="font-bold text-lg">
-          {formatCurrencyCompact(sub.effective_price ?? sub.price, sub.effective_currency ?? sub.currency)}
+          {formatCurrencyCompact(effectivePrice, effectiveCurrency)}
+          {convertedAmount !== null && (
+            <span className="text-sm font-normal opacity-70 ml-1">
+              ≈ {formatCurrencyWithDecimals(convertedAmount, targetCurrency, decimals)}
+            </span>
+          )}
         </p>
         {sub.effective_price != null && (sub.effective_price !== sub.price || sub.effective_currency !== sub.currency) && (
           <p className="text-xs opacity-50 line-through">

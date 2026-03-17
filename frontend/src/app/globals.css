@@ -127,3 +127,15 @@
     @apply font-sans;
   }
 }
+
+@keyframes svg-color-cycle {
+  0%   { filter: invert(70%) sepia(50%) saturate(500%) hue-rotate(90deg); }
+  25%  { filter: invert(50%) sepia(80%) saturate(600%) hue-rotate(200deg); }
+  50%  { filter: invert(60%) sepia(70%) saturate(700%) hue-rotate(280deg); }
+  75%  { filter: invert(65%) sepia(60%) saturate(600%) hue-rotate(340deg); }
+  100% { filter: invert(70%) sepia(50%) saturate(500%) hue-rotate(90deg); }
+}
+
+.animate-svg-color {
+  animation: svg-color-cycle 8s ease-in-out infinite;
+}
