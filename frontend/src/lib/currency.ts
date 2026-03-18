@@ -13,7 +13,7 @@ const CURRENCY_CONFIG: Record<string, CurrencyConfig> = {
   USD: { symbol: "$", precision: 2, pattern: "!#", name: "美元" },
   EUR: { symbol: "€", precision: 2, pattern: "!#", name: "欧元" },
   GBP: { symbol: "£", precision: 2, pattern: "!#", name: "英镑" },
-  JPY: { symbol: "¥", precision: 0, pattern: "!#", name: "日元" },
+  JPY: { symbol: "JP¥", precision: 0, pattern: "!#", name: "日元" },
   KRW: { symbol: "₩", precision: 0, pattern: "!#", name: "韩元" },
   INR: { symbol: "₹", precision: 2, pattern: "!#", name: "印度卢比" },
   RUB: { symbol: "₽", precision: 2, pattern: "#!", name: "俄罗斯卢布" },

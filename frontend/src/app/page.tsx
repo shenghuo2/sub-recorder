@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import * as api from "@/lib/api";
 import type { Subscription, Category, SceneWithSummary } from "@/lib/types";
-import { cycleToMonths } from "@/lib/types";
+import { cycleToMonths, getBillingCycleShort } from "@/lib/types";
 import { SubscriptionCard } from "@/components/subscription-card";
 import { SubscriptionDialog } from "@/components/subscription-dialog";
 import { SubscriptionDetailSheet } from "@/components/subscription-detail-sheet";
@@ -18,7 +18,7 @@ import { SubscriptionCalendar } from "@/components/subscription-calendar";
 import { CategoryFilter } from "@/components/category-filter";
 import { SortOptions, type SortField } from "@/components/sort-options";
 import { CategoryPanel } from "@/components/category-panel";
-import { SettingsPage } from "@/components/settings-page";
+import { SettingsPage, getNormalizeCycle, getCycleFormat } from "@/components/settings-page";
 import { fetchExchangeRates, convertCurrency } from "@/lib/currency";
 
 export default function Home() {
@@ -97,38 +97,50 @@ export default function Home() {
     }, 0);
   }, [toCNY]);
 
-  // Find smallest billing cycle among active recurring subscriptions and normalize total to that unit
+  // Normalize total to a chosen cycle (from settings, or auto = smallest cycle)
   const { totalNormalized, baseCycleMonths, baseCycleLabel } = useMemo(() => {
+    const normSetting = getNormalizeCycle();
+    const cycleFmt = getCycleFormat();
+
     const active = subscriptions.filter(
       (s) => !s.is_suspended && !s.is_one_time && !(s.end_date && new Date(s.end_date) < today)
     );
     if (active.length === 0) return { totalNormalized: 0, baseCycleMonths: 1, baseCycleLabel: "/月" };
 
-    // Collect all effective billing cycles to find the smallest
-    const allCycleMonths: number[] = [];
-    for (const s of active) {
-      const records = s.effective_records ?? [];
-      if (records.length === 0) {
-        allCycleMonths.push(cycleToMonths(s.billing_cycle));
-      } else {
-        for (const r of records) {
-          allCycleMonths.push(cycleToMonths(r.billing_cycle || s.billing_cycle));
+    let targetMonths: number;
+    let targetCycle: string;
+
+    if (normSetting === "auto") {
+      // Collect all effective billing cycles to find the smallest
+      const allCycleMonths: number[] = [];
+      for (const s of active) {
+        const records = s.effective_records ?? [];
+        if (records.length === 0) {
+          allCycleMonths.push(cycleToMonths(s.billing_cycle));
+        } else {
+          for (const r of records) {
+            allCycleMonths.push(cycleToMonths(r.billing_cycle || s.billing_cycle));
+          }
         }
       }
+      targetMonths = Math.min(...allCycleMonths);
+      // Map targetMonths back to a cycle string for label
+      const monthsToCycle: [number, string][] = [
+        [1 / 30, "day"], [7 / 30, "week"], [1, "month_1"], [2, "month_2"],
+        [3, "month_3"], [6, "month_6"], [12, "year_1"], [24, "year_2"], [36, "year_3"],
+      ];
+      targetCycle = monthsToCycle.find(([m]) => Math.abs(m - targetMonths) < 0.01)?.[1] || "month_1";
+    } else {
+      targetCycle = normSetting;
+      targetMonths = cycleToMonths(normSetting);
     }
-    const smallestMonths = Math.min(...allCycleMonths);
 
-    // Map smallestMonths back to a label
-    const cycleLabels: [number, string][] = [
-      [1 / 30, "/天"], [7 / 30, "/周"], [1, "/月"], [2, "/2月"],
-      [3, "/季"], [6, "/半年"], [12, "/年"], [24, "/2年"], [36, "/3年"],
-    ];
-    const label = cycleLabels.find(([m]) => Math.abs(m - smallestMonths) < 0.01)?.[1] || "/月";
+    const label = getBillingCycleShort(targetCycle, cycleFmt);
 
-    // Sum: each sub's monthly CNY * smallestMonths
-    const total = active.reduce((sum, s) => sum + subMonthlyCNY(s) * smallestMonths, 0);
+    // Sum: each sub's monthly CNY * targetMonths
+    const total = active.reduce((sum, s) => sum + subMonthlyCNY(s) * targetMonths, 0);
 
-    return { totalNormalized: total, baseCycleMonths: smallestMonths, baseCycleLabel: label };
+    return { totalNormalized: total, baseCycleMonths: targetMonths, baseCycleLabel: label };
   }, [subscriptions, today, subMonthlyCNY]);
 
   // 月支出：本月已到账单日期的订阅 + 本月付款的账单
@@ -480,6 +492,7 @@ export default function Home() {
           setDialogOpen(true);
         }}
         onRefresh={refresh}
+        exchangeRates={rates}
       />
 
       {/* 场景详情侧边栏 */}

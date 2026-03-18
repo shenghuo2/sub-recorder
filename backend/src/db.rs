@@ -94,6 +94,12 @@ pub fn init_db(conn: &Connection) {
     // Migration: add show_all_on_main column to scenes
     let _ = conn.execute_batch("ALTER TABLE scenes ADD COLUMN show_all_on_main INTEGER NOT NULL DEFAULT 0;");
 
+    // Migration: add exchange rate fields to billing_records
+    let _ = conn.execute_batch("ALTER TABLE billing_records ADD COLUMN converted_amount REAL;");
+    let _ = conn.execute_batch("ALTER TABLE billing_records ADD COLUMN target_currency TEXT;");
+    let _ = conn.execute_batch("ALTER TABLE billing_records ADD COLUMN exchange_rate REAL;");
+    let _ = conn.execute_batch("ALTER TABLE billing_records ADD COLUMN exchange_rate_date TEXT;");
+
     // Seed built-in categories (id 0-30) if they don't exist
     seed_default_categories(conn);
 }
@@ -548,8 +554,8 @@ pub fn create_billing_record(conn: &Connection, sub_id: &str, input: &CreateBill
     let currency = input.currency.as_deref().unwrap_or(&sub.currency);
 
     conn.execute(
-        "INSERT INTO billing_records (subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        "INSERT INTO billing_records (subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, converted_amount, target_currency, exchange_rate, exchange_rate_date) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         params![
             sub_id,
             input.period_start.to_string(),
@@ -559,6 +565,10 @@ pub fn create_billing_record(conn: &Connection, sub_id: &str, input: &CreateBill
             input.billing_cycle,
             input.notes,
             input.paid_at.map(|d| d.to_string()),
+            input.converted_amount,
+            input.target_currency,
+            input.exchange_rate,
+            input.exchange_rate_date,
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -567,7 +577,7 @@ pub fn create_billing_record(conn: &Connection, sub_id: &str, input: &CreateBill
 
 pub fn get_billing_record(conn: &Connection, id: i64) -> rusqlite::Result<Option<BillingRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, created_at \
+        "SELECT id, subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, converted_amount, target_currency, exchange_rate, exchange_rate_date, created_at \
          FROM billing_records WHERE id = ?1"
     )?;
     let mut rows = stmt.query_map(params![id], row_to_billing_record)?;
@@ -579,7 +589,7 @@ pub fn get_billing_record(conn: &Connection, id: i64) -> rusqlite::Result<Option
 
 pub fn list_billing_records(conn: &Connection, sub_id: &str) -> rusqlite::Result<Vec<BillingRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, created_at \
+        "SELECT id, subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, converted_amount, target_currency, exchange_rate, exchange_rate_date, created_at \
          FROM billing_records WHERE subscription_id = ?1 ORDER BY period_start DESC"
     )?;
     let rows = stmt.query_map(params![sub_id], row_to_billing_record)?;
@@ -599,9 +609,13 @@ pub fn update_billing_record(conn: &Connection, id: i64, input: &UpdateBillingRe
     let billing_cycle = if input.billing_cycle.is_some() { input.billing_cycle.clone() } else { existing.billing_cycle };
     let notes = if input.notes.is_some() { input.notes.clone() } else { existing.notes };
     let paid_at = if input.paid_at.is_some() { input.paid_at } else { existing.paid_at };
+    let converted_amount = if input.converted_amount.is_some() { input.converted_amount } else { existing.converted_amount };
+    let target_currency = if input.target_currency.is_some() { input.target_currency.clone() } else { existing.target_currency };
+    let exchange_rate = if input.exchange_rate.is_some() { input.exchange_rate } else { existing.exchange_rate };
+    let exchange_rate_date = if input.exchange_rate_date.is_some() { input.exchange_rate_date.clone() } else { existing.exchange_rate_date };
 
     conn.execute(
-        "UPDATE billing_records SET period_start=?1, period_end=?2, amount=?3, currency=?4, billing_cycle=?5, notes=?6, paid_at=?7 WHERE id=?8",
+        "UPDATE billing_records SET period_start=?1, period_end=?2, amount=?3, currency=?4, billing_cycle=?5, notes=?6, paid_at=?7, converted_amount=?8, target_currency=?9, exchange_rate=?10, exchange_rate_date=?11 WHERE id=?12",
         params![
             period_start.to_string(),
             period_end.to_string(),
@@ -610,6 +624,10 @@ pub fn update_billing_record(conn: &Connection, id: i64, input: &UpdateBillingRe
             billing_cycle,
             notes,
             paid_at.map(|d| d.to_string()),
+            converted_amount,
+            target_currency,
+            exchange_rate,
+            exchange_rate_date,
             id,
         ],
     )?;
@@ -633,7 +651,11 @@ fn row_to_billing_record(row: &rusqlite::Row) -> rusqlite::Result<BillingRecord>
         billing_cycle: row.get(6)?,
         notes: row.get(7)?,
         paid_at: row.get::<_, Option<String>>(8)?.map(|s| parse_date(&s)),
-        created_at: row.get(9)?,
+        converted_amount: row.get(9)?,
+        target_currency: row.get(10)?,
+        exchange_rate: row.get(11)?,
+        exchange_rate_date: row.get(12)?,
+        created_at: row.get(13)?,
     })
 }
 

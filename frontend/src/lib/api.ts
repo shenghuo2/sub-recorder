@@ -123,6 +123,10 @@ export async function createBillingRecord(subId: string, data: {
   billing_cycle?: string;
   notes?: string | null;
   paid_at?: string | null;
+  converted_amount?: number;
+  target_currency?: string;
+  exchange_rate?: number;
+  exchange_rate_date?: string;
 }): Promise<BillingRecord> {
   return request<BillingRecord>(`/api/subscriptions/${subId}/billing-records`, {
     method: "POST",

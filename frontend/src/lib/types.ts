@@ -73,6 +73,14 @@ export interface BillingRecord {
   billing_cycle: string | null;
   notes: string | null;
   paid_at: string | null;
+  /** 转换后的金额（按创建时汇率） */
+  converted_amount: number | null;
+  /** 目标货币 */
+  target_currency: string | null;
+  /** 汇率（原货币 -> 目标货币） */
+  exchange_rate: number | null;
+  /** 汇率记录时间点 */
+  exchange_rate_date: string | null;
   created_at: string;
 }
 

@@ -24,6 +24,7 @@ const CURRENCY_CONVERT_ENABLED_KEY = "sub_recorder_currency_convert_enabled";
 const CURRENCY_TARGET_KEY = "sub_recorder_currency_target";
 const CURRENCY_DECIMALS_KEY = "sub_recorder_currency_decimals";
 const CYCLE_FORMAT_KEY = "sub_recorder_cycle_format"; // "zh" or "en"
+const NORMALIZE_CYCLE_KEY = "sub_recorder_normalize_cycle"; // billing cycle for normalization, e.g. "month_1"
 
 export function getApiBaseUrl(): string {
   if (typeof window === "undefined") return DEFAULT_API_URL;
@@ -52,6 +53,12 @@ export function getCycleFormat(): "zh" | "en" {
   return val === "en" ? "en" : "zh";
 }
 
+/** 获取统计均分周期，默认 "auto"（自动取最小周期），否则返回固定 billing_cycle */
+export function getNormalizeCycle(): string {
+  if (typeof window === "undefined") return "auto";
+  return localStorage.getItem(NORMALIZE_CYCLE_KEY) || "auto";
+}
+
 export function SettingsPage() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [testing, setTesting] = useState(false);
@@ -62,6 +69,7 @@ export function SettingsPage() {
   const [targetCurrency, setTargetCurrency] = useState("CNY");
   const [decimals, setDecimals] = useState(2);
   const [cycleFormat, setCycleFormat] = useState<"zh" | "en">("zh");
+  const [normalizeCycle, setNormalizeCycle] = useState("auto");
 
   useEffect(() => {
     setApiUrl(getApiBaseUrl());
@@ -69,6 +77,7 @@ export function SettingsPage() {
     setTargetCurrency(getTargetCurrency());
     setDecimals(getCurrencyDecimals());
     setCycleFormat(getCycleFormat());
+    setNormalizeCycle(getNormalizeCycle());
   }, []);
 
   const handleSave = () => {
@@ -211,6 +220,30 @@ export function SettingsPage() {
                 <SelectItem value="1">1 位小数</SelectItem>
                 <SelectItem value="2">2 位小数</SelectItem>
                 <SelectItem value="3">3 位小数</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Normalize Cycle */}
+          <div className="space-y-2">
+            <Label className="text-sm">统计均分周期</Label>
+            <Label className="text-xs text-muted-foreground">控制主页汇总和卡片估算的均分计算单位</Label>
+            <Select
+              value={normalizeCycle}
+              onValueChange={(val) => {
+                setNormalizeCycle(val);
+                localStorage.setItem(NORMALIZE_CYCLE_KEY, val);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">自动（取最小周期）</SelectItem>
+                <SelectItem value="month_1">每月</SelectItem>
+                <SelectItem value="month_3">每季</SelectItem>
+                <SelectItem value="month_6">每半年</SelectItem>
+                <SelectItem value="year_1">每年</SelectItem>
               </SelectContent>
             </Select>
           </div>

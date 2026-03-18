@@ -199,6 +199,14 @@ pub struct BillingRecord {
     pub billing_cycle: Option<String>,
     pub notes: Option<String>,
     pub paid_at: Option<NaiveDate>,
+    /// 转换后的金额（按创建时汇率）
+    pub converted_amount: Option<f64>,
+    /// 目标货币
+    pub target_currency: Option<String>,
+    /// 汇率（原货币 -> 目标货币）
+    pub exchange_rate: Option<f64>,
+    /// 汇率记录时间点
+    pub exchange_rate_date: Option<String>,
     pub created_at: String,
 }
 
@@ -214,6 +222,14 @@ pub struct CreateBillingRecord {
     pub billing_cycle: Option<String>,
     pub notes: Option<String>,
     pub paid_at: Option<NaiveDate>,
+    /// 转换后的金额（按创建时汇率）
+    pub converted_amount: Option<f64>,
+    /// 目标货币
+    pub target_currency: Option<String>,
+    /// 汇率（原货币 -> 目标货币）
+    pub exchange_rate: Option<f64>,
+    /// 汇率记录时间点
+    pub exchange_rate_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +241,14 @@ pub struct UpdateBillingRecord {
     pub billing_cycle: Option<String>,
     pub notes: Option<String>,
     pub paid_at: Option<NaiveDate>,
+    /// 转换后的金额（按创建时汇率）
+    pub converted_amount: Option<f64>,
+    /// 目标货币
+    pub target_currency: Option<String>,
+    /// 汇率（原货币 -> 目标货币）
+    pub exchange_rate: Option<f64>,
+    /// 汇率记录时间点
+    pub exchange_rate_date: Option<String>,
 }
 
 // ========== 分类 ==========

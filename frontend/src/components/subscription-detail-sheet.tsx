@@ -29,6 +29,7 @@ import {
   Receipt,
   Calendar,
   ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 import type { Subscription, SubscriptionDetail, BillingRecord } from "@/lib/types";
 import { BILLING_CYCLES, BILLING_CYCLE_LABELS, parseCustomDays, getBillingCycleLabel, getBillingCycleShort } from "@/lib/types";
@@ -40,7 +41,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatCurrencyCompact } from "@/lib/currency";
+import { formatCurrencyCompact, convertCurrency } from "@/lib/currency";
+import { getTargetCurrency } from "@/components/settings-page";
 import { intToHex, getContrastColor } from "@/lib/color";
 import { IconUpload } from "@/components/icon-upload";
 import * as api from "@/lib/api";
@@ -50,6 +52,7 @@ interface Props {
   onClose: () => void;
   onEdit: (sub: Subscription) => void;
   onRefresh: () => void;
+  exchangeRates?: Record<string, number>;
 }
 
 export function SubscriptionDetailSheet({
@@ -57,6 +60,7 @@ export function SubscriptionDetailSheet({
   onClose,
   onEdit,
   onRefresh,
+  exchangeRates = {},
 }: Props) {
   const [detail, setDetail] = useState<SubscriptionDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -167,6 +171,41 @@ export function SubscriptionDetailSheet({
         });
         toast.success("账单记录已更新");
       } else {
+        // Calculate exchange rate info for new billing record
+        const recordAmount = brAmount ? Number(brAmount) : detail.price;
+        const recordCurrency = brCurrency || detail.currency;
+        const targetCurrency = getTargetCurrency();
+        let convertedAmount: number | undefined;
+        let exchangeRate: number | undefined;
+        
+        console.log('[BillingRecord] Creating with:', {
+          recordAmount,
+          recordCurrency,
+          targetCurrency,
+          exchangeRatesAvailable: Object.keys(exchangeRates).length,
+          exchangeRates,
+        });
+        
+        // Always save conversion info if currencies differ, even if rates not loaded yet
+        if (recordCurrency !== targetCurrency) {
+          if (Object.keys(exchangeRates).length > 0) {
+            // Use actual exchange rates
+            convertedAmount = convertCurrency(recordAmount, recordCurrency, targetCurrency, exchangeRates);
+            exchangeRate = convertedAmount / recordAmount;
+            console.log('[BillingRecord] Converted:', { convertedAmount, exchangeRate });
+          } else {
+            // Rates not loaded yet, save placeholder (will show original amount)
+            convertedAmount = recordAmount;
+            exchangeRate = 1.0;
+            console.log('[BillingRecord] No rates, using placeholder');
+          }
+        } else {
+          console.log('[BillingRecord] Same currency, no conversion needed');
+        }
+
+        // Save current date as exchange rate date if conversion happened
+        const exchangeRateDate = convertedAmount !== undefined ? new Date().toISOString().split('T')[0] : undefined;
+
         await api.createBillingRecord(detail.id, {
           period_start: brStart,
           period_end: brEnd,
@@ -175,6 +214,10 @@ export function SubscriptionDetailSheet({
           billing_cycle: effectiveCycle,
           notes: brNotes || null,
           paid_at: brPaidAt || null,
+          converted_amount: convertedAmount,
+          target_currency: convertedAmount !== undefined ? targetCurrency : undefined,
+          exchange_rate: exchangeRate,
+          exchange_rate_date: exchangeRateDate,
         });
         toast.success("账单记录已添加");
       }
@@ -443,8 +486,8 @@ export function SubscriptionDetailSheet({
                         key={record.id}
                         className="flex items-center justify-between rounded-lg border p-3"
                       >
-                        <div>
-                          <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-medium">
                               {formatCurrencyCompact(record.amount, record.currency)}
                             </span>
@@ -457,10 +500,23 @@ export function SubscriptionDetailSheet({
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {record.period_start} → {record.period_end}
-                          </p>
+                          <div className="flex flex-col gap-0.5 mt-1">
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {record.period_start} → {record.period_end}
+                            </p>
+                            {record.converted_amount && record.target_currency && (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                <span>≈ {formatCurrencyCompact(record.converted_amount, record.target_currency)}</span>
+                                {record.exchange_rate && (
+                                  <span className="opacity-70">
+                                    (汇率 {record.exchange_rate.toFixed(4)}
+                                    {record.exchange_rate_date && ` @ ${record.exchange_rate_date}`})
+                                  </span>
+                                )}
+                              </p>
+                            )}
+                          </div>
                         </div>
                         <div className="flex gap-1">
                           <Button
@@ -630,6 +686,67 @@ export function SubscriptionDetailSheet({
                 placeholder="如：活动优惠"
               />
             </div>
+            
+            {/* 汇率信息 - 仅在编辑时显示 */}
+            {editingRecord && (
+              <div className="grid gap-2 p-3 rounded-lg border bg-muted/50">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm">汇率信息</Label>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      const recordAmount = brAmount ? Number(brAmount) : editingRecord.amount;
+                      const recordCurrency = brCurrency || editingRecord.currency;
+                      const targetCurrency = getTargetCurrency();
+                      
+                      if (recordCurrency === targetCurrency) {
+                        toast.info("货币相同，无需换算");
+                        return;
+                      }
+                      
+                      if (Object.keys(exchangeRates).length === 0) {
+                        toast.error("汇率数据未加载");
+                        return;
+                      }
+                      
+                      const convertedAmount = convertCurrency(recordAmount, recordCurrency, targetCurrency, exchangeRates);
+                      const exchangeRate = convertedAmount / recordAmount;
+                      const exchangeRateDate = new Date().toISOString().split('T')[0];
+                      
+                      try {
+                        await api.updateBillingRecord(editingRecord.id, {
+                          converted_amount: convertedAmount,
+                          target_currency: targetCurrency,
+                          exchange_rate: exchangeRate,
+                          exchange_rate_date: exchangeRateDate,
+                        });
+                        toast.success("汇率已更新");
+                        loadDetail();
+                        onRefresh();
+                        setBillingOpen(false);
+                      } catch (e: unknown) {
+                        toast.error(e instanceof Error ? e.message : "更新失败");
+                      }
+                    }}
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    获取汇率
+                  </Button>
+                </div>
+                {editingRecord.converted_amount && editingRecord.target_currency && (
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <div>换算金额: {formatCurrencyCompact(editingRecord.converted_amount, editingRecord.target_currency)}</div>
+                    {editingRecord.exchange_rate && (
+                      <div>汇率: {editingRecord.exchange_rate.toFixed(4)}</div>
+                    )}
+                    {editingRecord.exchange_rate_date && (
+                      <div>记录时间: {editingRecord.exchange_rate_date}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBillingOpen(false)}>

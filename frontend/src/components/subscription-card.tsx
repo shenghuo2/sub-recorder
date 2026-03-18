@@ -7,7 +7,7 @@ import { intToHex, getContrastColor } from "@/lib/color";
 import { formatCurrencyCompact, formatCurrencyWithDecimals, convertCurrency, fetchExchangeRates } from "@/lib/currency";
 import { Badge } from "@/components/ui/badge";
 import { Pause } from "lucide-react";
-import { getCurrencyConvertEnabled, getTargetCurrency, getCurrencyDecimals, getCycleFormat } from "@/components/settings-page";
+import { getCurrencyConvertEnabled, getTargetCurrency, getCurrencyDecimals, getCycleFormat, getNormalizeCycle } from "@/components/settings-page";
 
 interface Props {
   subscription: Subscription;
@@ -61,10 +61,27 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
     }, 0);
   }
 
-  const needsConversion = convertEnabled && displayCurrency !== targetCurrency && exchangeRates;
+  // Normalize cycle setting
+  const normSetting = getNormalizeCycle();
+  const cycleFmt = getCycleFormat();
+
+  // Determine the estimate cycle and converted amount
   let convertedAmount: number | null = null;
+  let estimateCycle: string = displayCycle; // cycle for the estimate display
+
+  const needsConversion = convertEnabled && displayCurrency !== targetCurrency && exchangeRates;
   if (needsConversion && exchangeRates) {
-    convertedAmount = convertCurrency(displayPrice, displayCurrency, targetCurrency, exchangeRates, "CNY");
+    if (normSetting !== "auto" && !sub.is_one_time) {
+      // Normalize to the chosen cycle
+      const displayMonths = cycleToMonths(displayCycle);
+      const targetMonths = cycleToMonths(normSetting);
+      const monthly = convertCurrency(displayPrice, displayCurrency, targetCurrency, exchangeRates, "CNY") / displayMonths;
+      convertedAmount = monthly * targetMonths;
+      estimateCycle = normSetting;
+    } else {
+      // Keep original cycle
+      convertedAmount = convertCurrency(displayPrice, displayCurrency, targetCurrency, exchangeRates, "CNY");
+    }
   }
 
   const nextDateStr = sub.next_bill_date
@@ -131,6 +148,9 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
           {convertedAmount !== null && (
             <span className="opacity-60 ml-1">
               ≈ {formatCurrencyWithDecimals(convertedAmount, targetCurrency, decimals)}
+              {!sub.is_one_time && (
+                <span className="text-sm">{getBillingCycleShort(estimateCycle, cycleFmt)}</span>
+              )}
             </span>
           )}
         </p>

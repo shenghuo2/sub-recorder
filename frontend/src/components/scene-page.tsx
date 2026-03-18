@@ -518,6 +518,7 @@ export function ScenePage({ scenes, categories, onBack, onRefresh, initialSceneI
           setDialogOpen(true);
         }}
         onRefresh={refresh}
+        exchangeRates={exchangeRates}
       />
 
       {/* Scene settings dialog */}
