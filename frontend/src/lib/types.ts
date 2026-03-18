@@ -20,6 +20,8 @@ export interface Subscription {
   link: string | null;
   is_reminder_enabled: boolean;
   reminder_type: string | null;
+  scene_id: string | null;
+  show_on_main: boolean;
   created_at: string;
   updated_at: string;
   effective_records: EffectiveRecord[];
@@ -53,6 +55,8 @@ export interface SubscriptionDetail {
   link: string | null;
   is_reminder_enabled: boolean;
   reminder_type: string | null;
+  scene_id: string | null;
+  show_on_main: boolean;
   created_at: string;
   updated_at: string;
   billing_records: BillingRecord[];
@@ -85,6 +89,46 @@ export interface ApiResponse<T> {
   success: boolean;
   data: T | null;
   error: string | null;
+}
+
+// ========== 场景 ==========
+
+export interface Scene {
+  id: string;
+  name: string;
+  color: number | null;
+  icon: string | null;
+  icon_mime_type: string | null;
+  billing_cycle: string;
+  show_sub_logos: boolean;
+  notes: string | null;
+  link: string | null;
+  created_at: string;
+}
+
+export interface SubPreview {
+  name: string;
+  icon: string | null;
+  icon_mime_type: string | null;
+  price: number;
+  currency: string;
+  billing_cycle: string;
+  effective_records: { amount: number; currency: string; billing_cycle: string }[];
+  is_expired: boolean;
+  is_suspended: boolean;
+  show_on_main: boolean;
+}
+
+export interface SceneWithSummary extends Scene {
+  sub_count: number;
+  total_price: number;
+  total_currency: string;
+  nearest_next_bill: string | null;
+  sub_previews: SubPreview[];
+}
+
+export interface SceneDetail extends Scene {
+  subscriptions: Subscription[];
 }
 
 export const BILLING_CYCLE_LABELS: Record<string, string> = {
@@ -126,6 +170,7 @@ export const BILLING_CYCLE_SHORT_EN: Record<string, string> = {
 
 /** Parse custom_days cycle string like "custom_days:30" and return the number of days */
 export function parseCustomDays(cycle: string): number | null {
+  if (!cycle) return null;
   if (cycle.startsWith("custom_days:")) {
     const days = parseInt(cycle.split(":")[1], 10);
     return isNaN(days) ? null : days;
@@ -154,6 +199,7 @@ export function getBillingCycleLabel(cycle: string): string {
 }
 
 export function cycleToMonths(cycle: string): number {
+  if (!cycle) return 1; // default to monthly
   // Handle custom_days:XX format
   const customDays = parseCustomDays(cycle);
   if (customDays !== null) {

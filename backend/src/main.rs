@@ -59,6 +59,12 @@ async fn main() -> std::io::Result<()> {
             .route("/api/categories", web::post().to(handlers::create_category))
             .route("/api/categories/{id}", web::put().to(handlers::update_category))
             .route("/api/categories/{id}", web::delete().to(handlers::delete_category))
+            // 场景
+            .route("/api/scenes", web::get().to(handlers::list_scenes))
+            .route("/api/scenes", web::post().to(handlers::create_scene))
+            .route("/api/scenes/{id}", web::get().to(handlers::get_scene))
+            .route("/api/scenes/{id}", web::put().to(handlers::update_scene))
+            .route("/api/scenes/{id}", web::delete().to(handlers::delete_scene))
             // 导入
             .route("/api/import", web::post().to(handlers::import_data))
     })

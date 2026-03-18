@@ -1,4 +1,4 @@
-import type { ApiResponse, Subscription, SubscriptionDetail, BillingRecord, Category } from "./types";
+import type { ApiResponse, Subscription, SubscriptionDetail, BillingRecord, Category, Scene, SceneWithSummary, SceneDetail } from "./types";
 
 function getApiBase(): string {
   if (typeof window !== "undefined") {
@@ -163,4 +163,37 @@ export async function updateCategory(id: number, data: { name?: string; color?: 
 
 export async function deleteCategory(id: number): Promise<void> {
   return request<void>(`/api/categories/${id}`, { method: "DELETE" });
+}
+
+// ========== 场景 ==========
+
+export async function listScenes(): Promise<SceneWithSummary[]> {
+  return request<SceneWithSummary[]>("/api/scenes");
+}
+
+export async function getScene(id: string): Promise<SceneDetail> {
+  return request<SceneDetail>(`/api/scenes/${id}`);
+}
+
+export async function createScene(data: {
+  name: string;
+  color?: number | null;
+  billing_cycle?: string;
+  show_sub_logos?: boolean;
+}): Promise<Scene> {
+  return request<Scene>("/api/scenes", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateScene(id: string, data: Record<string, unknown>): Promise<Scene> {
+  return request<Scene>(`/api/scenes/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteScene(id: string): Promise<void> {
+  return request<void>(`/api/scenes/${id}`, { method: "DELETE" });
 }

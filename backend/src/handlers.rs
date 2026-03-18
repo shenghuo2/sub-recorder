@@ -289,6 +289,67 @@ pub async fn delete_category(
     }
 }
 
+// ========== 场景 ==========
+
+pub async fn create_scene(
+    state: web::Data<AppState>,
+    body: web::Json<CreateScene>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::create_scene(&conn, &body) {
+        Ok(scene) => HttpResponse::Created().json(ApiResponse::ok(scene)),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+pub async fn list_scenes(state: web::Data<AppState>) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::list_scenes(&conn) {
+        Ok(scenes) => HttpResponse::Ok().json(ApiResponse::ok(scenes)),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+pub async fn get_scene(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    let id = path.into_inner();
+    match db::get_scene_detail(&conn, &id) {
+        Ok(Some(detail)) => HttpResponse::Ok().json(ApiResponse::ok(detail)),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::<()>::err("场景不存在")),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+pub async fn update_scene(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+    body: web::Json<UpdateScene>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    let id = path.into_inner();
+    match db::update_scene(&conn, &id, &body) {
+        Ok(Some(scene)) => HttpResponse::Ok().json(ApiResponse::ok(scene)),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::<()>::err("场景不存在")),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+pub async fn delete_scene(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    let id = path.into_inner();
+    match db::delete_scene(&conn, &id) {
+        Ok(true) => HttpResponse::Ok().json(ApiResponse::ok("已删除")),
+        Ok(false) => HttpResponse::NotFound().json(ApiResponse::<()>::err("场景不存在")),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
 // ========== 导入 ==========
 
 pub async fn import_data(

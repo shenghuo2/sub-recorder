@@ -5,11 +5,14 @@ import { Plus, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import * as api from "@/lib/api";
-import type { Subscription, Category } from "@/lib/types";
+import type { Subscription, Category, SceneWithSummary } from "@/lib/types";
 import { cycleToMonths } from "@/lib/types";
 import { SubscriptionCard } from "@/components/subscription-card";
 import { SubscriptionDialog } from "@/components/subscription-dialog";
 import { SubscriptionDetailSheet } from "@/components/subscription-detail-sheet";
+import { SceneCard } from "@/components/scene-card";
+import { ScenePage } from "@/components/scene-page";
+import { SceneDetailSheet } from "@/components/scene-detail-sheet";
 import { NavSidebar, type NavPage } from "@/components/nav-sidebar";
 import { SubscriptionCalendar } from "@/components/subscription-calendar";
 import { CategoryFilter } from "@/components/category-filter";
@@ -21,11 +24,14 @@ import { fetchExchangeRates, convertCurrency } from "@/lib/currency";
 export default function Home() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [scenes, setScenes] = useState<SceneWithSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
   const [detailSubId, setDetailSubId] = useState<string | null>(null);
   const [navPage, setNavPage] = useState<NavPage>("subscriptions");
+  const [initialSceneId, setInitialSceneId] = useState<string | null>(null);
+  const [detailSceneId, setDetailSceneId] = useState<string | null>(null);
 
   // Filter & sort state
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -44,6 +50,13 @@ export default function Home() {
       ]);
       setSubscriptions(subs);
       setCategories(cats);
+      // Scenes loaded separately so failure doesn't break main page
+      try {
+        const scns = await api.listScenes();
+        setScenes(scns);
+      } catch {
+        setScenes([]);
+      }
     } catch (e: unknown) {
       toast.error("加载失败: " + (e instanceof Error ? e.message : "未知错误"));
     } finally {
@@ -149,9 +162,29 @@ export default function Home() {
     }, 0),
     [subscriptions, today, currentYear, currentMonth, toCNY]);
 
-  // Filter + Sort
-  const filteredAndSorted = useMemo(() => {
-    let list = [...subscriptions];
+  // Helper to compute scene monthly CNY (using effective_records, filtering expired/suspended)
+  const sceneMonthlyCNY = useCallback((scene: SceneWithSummary) => {
+    return scene.sub_previews.reduce((sum, p) => {
+      if (p.is_expired || p.is_suspended) return sum;
+      const records = p.effective_records ?? [];
+      if (records.length > 0) {
+        return sum + records.reduce((s, r) => {
+          const months = cycleToMonths(r.billing_cycle || p.billing_cycle);
+          return s + convertCurrency(r.amount, r.currency, "CNY", rates) / months;
+        }, 0);
+      }
+      const price = p.price ?? 0;
+      const currency = p.currency ?? "CNY";
+      const subMonths = cycleToMonths(p.billing_cycle);
+      const monthly = price / subMonths;
+      return sum + convertCurrency(monthly, currency, "CNY", rates);
+    }, 0);
+  }, [rates]);
+
+  // Filter + Sort (subscriptions only, for filtering)
+  const filteredSubs = useMemo(() => {
+    // On main page: show subs without scene_id, or subs with show_on_main=true
+    let list = subscriptions.filter(s => !s.scene_id || s.show_on_main);
 
     // Calendar date filter
     if (selectedDate) {
@@ -166,10 +199,47 @@ export default function Home() {
       });
     }
 
-    // Sort: always put expired last
-    const isExpired = (s: Subscription) => s.end_date ? new Date(s.end_date) < today : false;
+    return list;
+  }, [subscriptions, selectedDate, selectedCategoryIds]);
 
-    list.sort((a, b) => {
+  // Unified sorted list: scenes + subscriptions together
+  type CardItem = { type: "scene"; data: SceneWithSummary } | { type: "sub"; data: Subscription };
+  const sortedCards = useMemo(() => {
+    // Filter out scenes with 0 sub_count, or where all subs have show_on_main=true
+    const visibleScenes = scenes.filter(s => {
+      if (s.sub_count === 0) return false;
+      // Hide scene if ALL its subs are shown on main
+      const allOnMain = s.sub_previews.length > 0 && s.sub_previews.every(p => p.show_on_main);
+      return !allOnMain;
+    });
+    
+    // Build unified list
+    const items: CardItem[] = [
+      ...visibleScenes.map(s => ({ type: "scene" as const, data: s })),
+      ...filteredSubs.map(s => ({ type: "sub" as const, data: s })),
+    ];
+
+    // Sort: always put expired subs last
+    const isExpired = (item: CardItem) => {
+      if (item.type === "scene") return false; // scenes never expire
+      return item.data.end_date ? new Date(item.data.end_date) < today : false;
+    };
+
+    const getName = (item: CardItem) => item.data.name;
+    const getDate = (item: CardItem) => {
+      if (item.type === "scene") return item.data.nearest_next_bill || "9999-12-31";
+      return item.data.next_bill_date || "9999-12-31";
+    };
+    const getMonthly = (item: CardItem) => {
+      if (item.type === "scene") return sceneMonthlyCNY(item.data);
+      return subMonthlyCNY(item.data);
+    };
+    const getCategory = (item: CardItem) => {
+      if (item.type === "scene") return 999998; // scenes sort before uncategorized
+      return item.data.category_id ?? 999999;
+    };
+
+    items.sort((a, b) => {
       const ae = isExpired(a);
       const be = isExpired(b);
       if (ae !== be) return ae ? 1 : -1;
@@ -177,29 +247,26 @@ export default function Home() {
       let cmp = 0;
       switch (sortBy) {
         case "name":
-          cmp = a.name.localeCompare(b.name, "zh-CN");
+          cmp = getName(a).localeCompare(getName(b), "zh-CN");
           break;
         case "category":
-          cmp = (a.category_id ?? 999999) - (b.category_id ?? 999999);
+          cmp = getCategory(a) - getCategory(b);
           break;
-        case "billing_date": {
-          const aDate = a.next_bill_date || "9999-12-31";
-          const bDate = b.next_bill_date || "9999-12-31";
-          cmp = aDate.localeCompare(bDate);
+        case "billing_date":
+          cmp = getDate(a).localeCompare(getDate(b));
           break;
-        }
         case "price_high":
-          cmp = subMonthlyCNY(b) - subMonthlyCNY(a);
+          cmp = getMonthly(b) - getMonthly(a);
           break;
         case "price_low":
-          cmp = subMonthlyCNY(a) - subMonthlyCNY(b);
+          cmp = getMonthly(a) - getMonthly(b);
           break;
       }
       return sortReversed ? -cmp : cmp;
     });
 
-    return list;
-  }, [subscriptions, selectedDate, selectedCategoryIds, sortBy, sortReversed, today, subMonthlyCNY]);
+    return items;
+  }, [scenes, filteredSubs, sortBy, sortReversed, today, subMonthlyCNY, sceneMonthlyCNY]);
 
   const filterContent = (
     <div className="p-4 space-y-4">
@@ -301,7 +368,7 @@ export default function Home() {
             <div className="flex items-center justify-center py-20 text-muted-foreground">
               加载中...
             </div>
-          ) : filteredAndSorted.length === 0 ? (
+          ) : sortedCards.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
               {subscriptions.length === 0 ? (
                 <>
@@ -314,14 +381,23 @@ export default function Home() {
             </div>
           ) : (
             <div className="flex flex-col gap-2 md:gap-3">
-              {filteredAndSorted.map((sub) => (
-                <SubscriptionCard
-                  key={sub.id}
-                  subscription={sub}
-                  onClick={() => setDetailSubId(sub.id)}
-                  exchangeRates={rates}
-                />
-              ))}
+              {sortedCards.map((item) =>
+                item.type === "scene" ? (
+                  <SceneCard
+                    key={`scene-${item.data.id}`}
+                    scene={item.data}
+                    onClick={() => setDetailSceneId(item.data.id)}
+                    exchangeRates={rates}
+                  />
+                ) : (
+                  <SubscriptionCard
+                    key={`sub-${item.data.id}`}
+                    subscription={item.data}
+                    onClick={() => setDetailSubId(item.data.id)}
+                    exchangeRates={rates}
+                  />
+                )
+              )}
             </div>
           )}
         </div>
@@ -346,6 +422,20 @@ export default function Home() {
       <NavSidebar current={navPage} onChange={setNavPage} />
 
       {navPage === "subscriptions" && renderSubscriptionsPage()}
+
+      {navPage === "scenes" && (
+        <ScenePage
+          scenes={scenes}
+          categories={categories}
+          onBack={() => {
+            setNavPage("subscriptions");
+            setInitialSceneId(null);
+          }}
+          onRefresh={refresh}
+          initialSceneId={initialSceneId}
+          exchangeRates={rates}
+        />
+      )}
 
       {navPage === "categories" && (
         <div className="flex-1 overflow-y-auto">
@@ -373,6 +463,7 @@ export default function Home() {
         onOpenChange={setDialogOpen}
         subscription={editingSub}
         categories={categories}
+        scenes={scenes}
         onSaved={() => {
           setDialogOpen(false);
           refresh();
@@ -389,6 +480,19 @@ export default function Home() {
           setDialogOpen(true);
         }}
         onRefresh={refresh}
+      />
+
+      {/* 场景详情侧边栏 */}
+      <SceneDetailSheet
+        scene={scenes.find(s => s.id === detailSceneId) ?? null}
+        onClose={() => setDetailSceneId(null)}
+        onRefresh={refresh}
+        onNavigate={() => {
+          setDetailSceneId(null);
+          setInitialSceneId(detailSceneId);
+          setNavPage("scenes");
+        }}
+        exchangeRates={rates}
       />
     </div>
   );

@@ -132,6 +132,8 @@ pub struct Subscription {
     pub link: Option<String>,
     pub is_reminder_enabled: bool,
     pub reminder_type: Option<String>,
+    pub scene_id: Option<String>,
+    pub show_on_main: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -154,6 +156,8 @@ pub struct CreateSubscription {
     pub link: Option<String>,
     pub is_reminder_enabled: Option<bool>,
     pub reminder_type: Option<String>,
+    pub scene_id: Option<String>,
+    pub show_on_main: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +177,8 @@ pub struct UpdateSubscription {
     pub link: Option<String>,
     pub is_reminder_enabled: Option<bool>,
     pub reminder_type: Option<String>,
+    pub scene_id: Option<String>,
+    pub show_on_main: Option<bool>,
 }
 
 // ========== 账单记录 ==========
@@ -280,6 +286,83 @@ pub struct UploadIcon {
 pub struct UploadIconFromUrl {
     /// 图片 URL
     pub url: String,
+}
+
+// ========== 场景 ==========
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Scene {
+    pub id: String,
+    pub name: String,
+    pub color: Option<i64>,
+    pub icon: Option<String>,
+    pub icon_mime_type: Option<String>,
+    pub billing_cycle: String,
+    pub show_sub_logos: bool,
+    pub notes: Option<String>,
+    pub link: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateScene {
+    pub name: String,
+    pub color: Option<i64>,
+    pub icon: Option<String>,
+    pub icon_mime_type: Option<String>,
+    pub billing_cycle: Option<String>,
+    pub show_sub_logos: Option<bool>,
+    pub notes: Option<String>,
+    pub link: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateScene {
+    pub name: Option<String>,
+    pub color: Option<i64>,
+    pub icon: Option<String>,
+    pub icon_mime_type: Option<String>,
+    pub billing_cycle: Option<String>,
+    pub show_sub_logos: Option<bool>,
+    pub notes: Option<String>,
+    pub link: Option<String>,
+}
+
+/// 场景列表项，包含聚合信息
+#[derive(Debug, Serialize)]
+pub struct SceneWithSummary {
+    #[serde(flatten)]
+    pub scene: Scene,
+    pub sub_count: usize,
+    /// 所有子订阅按场景展示周期归一化后的总价
+    pub total_price: f64,
+    pub total_currency: String,
+    /// 最近的下次付款日期
+    pub nearest_next_bill: Option<NaiveDate>,
+    /// 子订阅的迷你信息（名称、icon、mime）
+    pub sub_previews: Vec<SubPreview>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubPreview {
+    pub name: String,
+    pub icon: Option<String>,
+    pub icon_mime_type: Option<String>,
+    pub price: f64,
+    pub currency: String,
+    pub billing_cycle: String,
+    pub effective_records: Vec<EffectiveRecord>,
+    pub is_expired: bool,
+    pub is_suspended: bool,
+    pub show_on_main: bool,
+}
+
+/// 场景详情，包含所有子订阅
+#[derive(Debug, Serialize)]
+pub struct SceneDetail {
+    #[serde(flatten)]
+    pub scene: Scene,
+    pub subscriptions: Vec<SubscriptionWithEffective>,
 }
 
 // ========== 统一响应 ==========

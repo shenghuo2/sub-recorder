@@ -1,10 +1,10 @@
 "use client";
 
-import { LayoutDashboard, Settings, FolderOpen } from "lucide-react";
+import { LayoutDashboard, Settings, FolderOpen, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AppLogo } from "@/components/animated-logo";
 
-export type NavPage = "subscriptions" | "categories" | "settings";
+export type NavPage = "subscriptions" | "scenes" | "categories" | "settings";
 
 interface Props {
   current: NavPage;
@@ -13,6 +13,7 @@ interface Props {
 
 const NAV_ITEMS: { id: NavPage; icon: React.ElementType; label: string }[] = [
   { id: "subscriptions", icon: LayoutDashboard, label: "订阅" },
+  { id: "scenes", icon: Layers, label: "场景" },
   { id: "categories", icon: FolderOpen, label: "分类" },
   { id: "settings", icon: Settings, label: "设置" },
 ];

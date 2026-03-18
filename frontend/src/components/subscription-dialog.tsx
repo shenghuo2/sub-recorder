@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Subscription, Category } from "@/lib/types";
+import type { Subscription, Category, Scene } from "@/lib/types";
 import { BILLING_CYCLES, BILLING_CYCLE_LABELS, parseCustomDays } from "@/lib/types";
 import { SUPPORTED_CURRENCIES as CURRENCIES, getSymbol } from "@/lib/currency";
 import { PRESET_COLORS } from "@/lib/color";
@@ -33,7 +33,9 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   subscription: Subscription | null;
   categories: Category[];
+  scenes?: Scene[];
   onSaved: () => void;
+  defaultSceneId?: string | null;
 }
 
 export function SubscriptionDialog({
@@ -41,7 +43,9 @@ export function SubscriptionDialog({
   onOpenChange,
   subscription,
   categories,
+  scenes = [],
   onSaved,
+  defaultSceneId,
 }: Props) {
   const isEdit = !!subscription;
 
@@ -63,6 +67,8 @@ export function SubscriptionDialog({
   const [saving, setSaving] = useState(false);
   const [icon, setIcon] = useState<string | null>(null);
   const [iconMimeType, setIconMimeType] = useState<string | null>(null);
+  const [sceneId, setSceneId] = useState<string | null>(null);
+  const [showOnMain, setShowOnMain] = useState(true);
 
   useEffect(() => {
     if (open) {
@@ -93,6 +99,8 @@ export function SubscriptionDialog({
         setReminderType(subscription.reminder_type || "one_day");
         setIcon(subscription.icon || null);
         setIconMimeType(subscription.icon_mime_type || null);
+        setSceneId(subscription.scene_id ?? null);
+        setShowOnMain(subscription.show_on_main ?? true);
       } else {
         setName("");
         setPrice("");
@@ -111,6 +119,8 @@ export function SubscriptionDialog({
         setReminderType("one_day");
         setIcon(null);
         setIconMimeType(null);
+        setSceneId(defaultSceneId ?? null);
+        setShowOnMain(defaultSceneId ? false : true);
       }
     }
   }, [open, subscription]);
@@ -155,6 +165,8 @@ export function SubscriptionDialog({
         link: link.trim() || null,
         is_reminder_enabled: isReminderEnabled,
         reminder_type: reminderType,
+        scene_id: sceneId || null,
+        show_on_main: showOnMain,
       };
 
       if (isEdit) {
@@ -295,16 +307,30 @@ export function SubscriptionDialog({
             </div>
           </div>
 
-          {/* 一次性 */}
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="isOneTime"
-              checked={isOneTime}
-              onChange={(e) => setIsOneTime(e.target.checked)}
-              className="h-4 w-4 rounded"
-            />
-            <Label htmlFor="isOneTime">一次性付费</Label>
+          {/* 一次性 + 主页显示 */}
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="isOneTime"
+                checked={isOneTime}
+                onChange={(e) => setIsOneTime(e.target.checked)}
+                className="h-4 w-4 rounded"
+              />
+              <Label htmlFor="isOneTime">一次性付费</Label>
+            </div>
+            {sceneId && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="showOnMain"
+                  checked={showOnMain}
+                  onChange={(e) => setShowOnMain(e.target.checked)}
+                  className="h-4 w-4 rounded"
+                />
+                <Label htmlFor="showOnMain">在主页单列显示</Label>
+              </div>
+            )}
           </div>
 
           {/* 颜色 */}
@@ -315,17 +341,17 @@ export function SubscriptionDialog({
                 <button
                   key={c}
                   type="button"
-                  className="h-7 w-7 rounded-full border-2 transition-transform hover:scale-110"
+                  className="h-8 w-8 rounded-full border transition-transform hover:scale-110"
                   style={{
                     backgroundColor: c,
-                    borderColor: color === c ? "white" : "transparent",
+                    borderColor: color === c ? "white" : "rgba(0,0,0,0.15)",
                     boxShadow: color === c ? `0 0 0 2px ${c}` : "none",
                   }}
                   onClick={() => setColor(c)}
                 />
               ))}
               {/* 自定义颜色选择器 */}
-              <label className="h-7 w-7 rounded-full border-2 border-dashed border-muted-foreground/40 flex items-center justify-center cursor-pointer hover:scale-110 transition-transform overflow-hidden relative">
+              <label className="h-8 w-8 rounded-full border border-dashed border-muted-foreground/40 flex items-center justify-center cursor-pointer hover:scale-110 transition-transform overflow-hidden relative">
                 <span className="text-xs text-muted-foreground">+</span>
                 <input
                   type="color"
@@ -384,6 +410,26 @@ export function SubscriptionDialog({
                       </SelectItem>
                     );
                   })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* 场景 */}
+          {scenes.length > 0 && (
+            <div className="grid gap-2">
+              <Label>归属场景</Label>
+              <Select value={sceneId || "__none__"} onValueChange={(v) => setSceneId(v === "__none__" ? null : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="无场景" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">无场景（主页显示）</SelectItem>
+                  {scenes.map((scene) => (
+                    <SelectItem key={scene.id} value={scene.id}>
+                      {scene.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
