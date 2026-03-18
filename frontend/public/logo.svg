@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <!-- 循环箭头圆环 -->
+  <circle cx="64" cy="64" r="52" stroke="#6366f1" stroke-width="8" fill="none" stroke-dasharray="260 68" stroke-linecap="round" transform="rotate(-30 64 64)"/>
+  
+  <!-- 箭头头部 -->
+  <path d="M98 28 L112 48 L92 52 Z" fill="#6366f1"/>
+  
+  <!-- 中心美元符号 -->
+  <text x="64" y="82" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="700" fill="#6366f1" text-anchor="middle">$</text>
+</svg>

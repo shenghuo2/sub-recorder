@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- 背景圆角矩形 (卡片/账单) -->
+  <rect x="80" y="100" width="352" height="280" rx="32" fill="#6366f1" />
+  
+  <!-- 卡片上的横线 (账单条目) -->
+  <rect x="120" y="150" width="180" height="16" rx="8" fill="white" opacity="0.9"/>
+  <rect x="120" y="190" width="140" height="12" rx="6" fill="white" opacity="0.5"/>
+  <rect x="120" y="220" width="160" height="12" rx="6" fill="white" opacity="0.5"/>
+  <rect x="120" y="250" width="120" height="12" rx="6" fill="white" opacity="0.5"/>
+  
+  <!-- 金额 -->
+  <text x="340" y="168" font-family="system-ui, sans-serif" font-size="36" font-weight="700" fill="white" text-anchor="end">$</text>
+  
+  <!-- 循环箭头 (订阅/周期性) -->
+  <g transform="translate(320, 280)">
+    <!-- 圆形路径 -->
+    <circle cx="40" cy="40" r="50" stroke="white" stroke-width="10" fill="none" stroke-dasharray="220 100" stroke-linecap="round" opacity="0.9"/>
+    <!-- 箭头 -->
+    <polygon points="85,15 105,40 80,45" fill="white" opacity="0.9"/>
+  </g>
+  
+  <!-- 日历角标 -->
+  <g transform="translate(60, 60)">
+    <rect width="64" height="64" rx="12" fill="#f43f5e"/>
+    <rect x="12" y="8" width="8" height="16" rx="4" fill="white"/>
+    <rect x="44" y="8" width="8" height="16" rx="4" fill="white"/>
+    <rect x="8" y="28" width="48" height="4" rx="2" fill="white" opacity="0.6"/>
+    <text x="32" y="54" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="white" text-anchor="middle">31</text>
+  </g>
+</svg>

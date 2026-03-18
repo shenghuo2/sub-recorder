@@ -1,3 +1,4 @@
+mod auth;
 mod db;
 mod handlers;
 mod models;
@@ -23,7 +24,9 @@ async fn main() -> std::io::Result<()> {
         .expect("Failed to set PRAGMA");
     db::init_db(&conn);
 
+    let auth_enabled = !auth::is_auth_disabled();
     log::info!("数据库已初始化: {}", db_path);
+    log::info!("鉴权状态: {}", if auth_enabled { "已启用" } else { "已禁用 (DISABLE_AUTH=true)" });
     log::info!("服务启动在 http://0.0.0.0:{}", port);
 
     let state = web::Data::new(AppState { db: Mutex::new(conn) });
@@ -33,6 +36,7 @@ async fn main() -> std::io::Result<()> {
         let json_cfg = web::JsonConfig::default().limit(10 * 1024 * 1024); // 10MB
         App::new()
             .wrap(cors)
+            .wrap(auth::AuthMiddleware::new())
             .wrap(middleware::Logger::default())
             .app_data(state.clone())
             .app_data(json_cfg)
@@ -67,6 +71,11 @@ async fn main() -> std::io::Result<()> {
             .route("/api/scenes/{id}", web::delete().to(handlers::delete_scene))
             // 导入
             .route("/api/import", web::post().to(handlers::import_data))
+            // 鉴权
+            .route("/api/auth/login", web::post().to(handlers::login))
+            .route("/api/auth/check", web::get().to(handlers::check_auth))
+            .route("/api/auth/user", web::get().to(handlers::get_user_info))
+            .route("/api/auth/user", web::put().to(handlers::update_user))
     })
     .bind(("0.0.0.0", port))?
     .run()

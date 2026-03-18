@@ -20,8 +20,13 @@ import { SortOptions, type SortField } from "@/components/sort-options";
 import { CategoryPanel } from "@/components/category-panel";
 import { SettingsPage, getNormalizeCycle, getCycleFormat } from "@/components/settings-page";
 import { fetchExchangeRates, convertCurrency } from "@/lib/currency";
+import { LoginPage } from "@/components/login-page";
 
 export default function Home() {
+  // 鉴权状态
+  const [authChecking, setAuthChecking] = useState(true);
+  const [needLogin, setNeedLogin] = useState(false);
+
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [scenes, setScenes] = useState<SceneWithSummary[]>([]);
@@ -41,6 +46,39 @@ export default function Home() {
 
   const [rates, setRates] = useState<Record<string, number>>({});
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+
+  // 检查鉴权状态
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      try {
+        const { require_auth } = await api.checkAuth();
+        if (require_auth) {
+          // 需要鉴权，检查是否有有效 token
+          const token = api.getAuthToken();
+          if (!token) {
+            setNeedLogin(true);
+          }
+        }
+      } catch {
+        // 如果检查失败，假设不需要鉴权
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+    checkAuthStatus();
+
+    // 监听 auth-required 事件
+    const handleAuthRequired = () => {
+      setNeedLogin(true);
+    };
+    window.addEventListener("auth-required", handleAuthRequired);
+    return () => window.removeEventListener("auth-required", handleAuthRequired);
+  }, []);
+
+  const handleLoginSuccess = () => {
+    setNeedLogin(false);
+    refresh();
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -314,6 +352,20 @@ export default function Home() {
       </div>
     </div>
   );
+
+  // 正在检查鉴权状态
+  if (authChecking) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="text-muted-foreground">加载中...</div>
+      </div>
+    );
+  }
+
+  // 需要登录
+  if (needLogin) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
 
   // Render the subscriptions page content
   const renderSubscriptionsPage = () => (

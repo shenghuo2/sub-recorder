@@ -60,6 +60,13 @@ pub fn init_db(conn: &Connection) {
         CREATE INDEX IF NOT EXISTS idx_billing_records_sub_id ON billing_records(subscription_id);
         CREATE INDEX IF NOT EXISTS idx_billing_records_period ON billing_records(period_start, period_end);
 
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS scenes (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -102,6 +109,9 @@ pub fn init_db(conn: &Connection) {
 
     // Seed built-in categories (id 0-30) if they don't exist
     seed_default_categories(conn);
+
+    // Initialize default user if not exists
+    init_default_user(conn);
 }
 
 // ========== 分类 ==========
@@ -997,6 +1007,107 @@ pub fn delete_scene(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     conn.execute("UPDATE subscriptions SET scene_id = NULL WHERE scene_id = ?1", params![id])?;
     let affected = conn.execute("DELETE FROM scenes WHERE id = ?1", params![id])?;
     Ok(affected > 0)
+}
+
+// ========== 用户/鉴权 ==========
+
+use sha2::{Sha256, Digest};
+
+pub fn hash_password(password: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(password.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+pub fn generate_random_password() -> String {
+    use uuid::Uuid;
+    let uuid = Uuid::new_v4().to_string();
+    // Take first 12 chars for a readable password
+    uuid.chars().filter(|c| c.is_alphanumeric()).take(12).collect()
+}
+
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub password_hash: String,
+    pub created_at: String,
+}
+
+/// Initialize default user if no users exist
+/// Returns the generated password if a new user was created
+pub fn init_default_user(conn: &Connection) -> Option<String> {
+    // Check if any user exists
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM users",
+        [],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    if count == 0 {
+        let password = generate_random_password();
+        let password_hash = hash_password(&password);
+        let _ = conn.execute(
+            "INSERT INTO users (id, username, password_hash) VALUES (1, 'admin', ?1)",
+            params![password_hash],
+        );
+        log::info!("========================================");
+        log::info!("首次启动，已创建默认用户");
+        log::info!("用户名: admin");
+        log::info!("密码: {}", password);
+        log::info!("请登录后在设置中修改密码！");
+        log::info!("========================================");
+        Some(password)
+    } else {
+        None
+    }
+}
+
+pub fn get_user(conn: &Connection) -> rusqlite::Result<Option<User>> {
+    let mut stmt = conn.prepare("SELECT id, username, password_hash, created_at FROM users WHERE id = 1")?;
+    let mut rows = stmt.query_map([], |row| {
+        Ok(User {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            password_hash: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    })?;
+    match rows.next() {
+        Some(r) => Ok(Some(r?)),
+        None => Ok(None),
+    }
+}
+
+pub fn verify_password(conn: &Connection, password: &str) -> bool {
+    if let Ok(Some(user)) = get_user(conn) {
+        let input_hash = hash_password(password);
+        user.password_hash == input_hash
+    } else {
+        false
+    }
+}
+
+pub fn update_user(conn: &Connection, username: Option<&str>, password: Option<&str>) -> rusqlite::Result<bool> {
+    if let Some(pwd) = password {
+        let hash = hash_password(pwd);
+        if let Some(name) = username {
+            conn.execute(
+                "UPDATE users SET username = ?1, password_hash = ?2 WHERE id = 1",
+                params![name, hash],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE users SET password_hash = ?1 WHERE id = 1",
+                params![hash],
+            )?;
+        }
+    } else if let Some(name) = username {
+        conn.execute(
+            "UPDATE users SET username = ?1 WHERE id = 1",
+            params![name],
+        )?;
+    }
+    Ok(true)
 }
 
 // ========== 辅助函数 ==========

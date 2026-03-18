@@ -10,16 +10,136 @@ function getApiBase(): string {
 
 const API_BASE = typeof window !== "undefined" ? getApiBase() : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456");
 
+// ========== 鉴权相关 ==========
+
+const AUTH_TOKEN_KEY = "sub_recorder_auth_token";
+
+export function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+export function setAuthToken(token: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+export function clearAuthToken(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string> || {}),
+  };
+  
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
+  
+  // 处理 401 未授权
+  if (res.status === 401) {
+    clearAuthToken();
+    // 触发自定义事件通知前端需要登录
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("auth-required"));
+    }
+    throw new Error("未授权访问，请先登录");
+  }
+  
   const json: ApiResponse<T> = await res.json();
   if (!json.success) {
     throw new Error(json.error || "请求失败");
   }
   return json.data as T;
+}
+
+// ========== 鉴权 API ==========
+
+export interface AuthCheckResponse {
+  require_auth: boolean;
+}
+
+export interface LoginResponse {
+  token: string;
+  username: string;
+  require_auth: boolean;
+}
+
+export interface UserInfo {
+  username: string;
+}
+
+const USERNAME_KEY = "sub_recorder_username";
+
+export function getStoredUsername(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(USERNAME_KEY);
+}
+
+export function setStoredUsername(username: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(USERNAME_KEY, username);
+}
+
+export async function checkAuth(): Promise<AuthCheckResponse> {
+  const res = await fetch(`${getApiBase()}/api/auth/check`, {
+    headers: { "Content-Type": "application/json" },
+  });
+  const json: ApiResponse<AuthCheckResponse> = await res.json();
+  if (!json.success) {
+    throw new Error(json.error || "请求失败");
+  }
+  return json.data as AuthCheckResponse;
+}
+
+export async function login(password: string): Promise<LoginResponse> {
+  const res = await fetch(`${getApiBase()}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  const json: ApiResponse<LoginResponse> = await res.json();
+  if (!json.success) {
+    throw new Error(json.error || "登录失败");
+  }
+  if (json.data?.token) {
+    setAuthToken(json.data.token);
+  }
+  if (json.data?.username) {
+    setStoredUsername(json.data.username);
+  }
+  return json.data as LoginResponse;
+}
+
+export async function getUserInfo(): Promise<UserInfo> {
+  return request<UserInfo>("/api/auth/user");
+}
+
+export async function updateUser(data: {
+  username?: string;
+  old_password?: string;
+  new_password?: string;
+}): Promise<{ username: string; token?: string }> {
+  const result = await request<{ username: string; token?: string }>("/api/auth/user", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  if (result.username) {
+    setStoredUsername(result.username);
+  }
+  if (result.token) {
+    setAuthToken(result.token);
+  }
+  return result;
 }
 
 // ========== 订阅 ==========

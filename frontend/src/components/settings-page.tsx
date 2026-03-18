@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Check, RotateCcw, Server, RefreshCw } from "lucide-react";
+import { Check, RotateCcw, Server, RefreshCw, LogOut } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig } from "@/lib/currency";
+import { clearAuthToken, getAuthToken, getStoredUsername, updateUser } from "@/lib/api";
 
 const API_URL_KEY = "sub_recorder_api_url";
 const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456";
@@ -71,6 +72,14 @@ export function SettingsPage() {
   const [cycleFormat, setCycleFormat] = useState<"zh" | "en">("zh");
   const [normalizeCycle, setNormalizeCycle] = useState("auto");
 
+  // 用户账户
+  const [username, setUsername] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingUser, setSavingUser] = useState(false);
+
   useEffect(() => {
     setApiUrl(getApiBaseUrl());
     setConvertEnabled(getCurrencyConvertEnabled());
@@ -78,6 +87,12 @@ export function SettingsPage() {
     setDecimals(getCurrencyDecimals());
     setCycleFormat(getCycleFormat());
     setNormalizeCycle(getNormalizeCycle());
+    // 加载用户名
+    const storedUsername = getStoredUsername();
+    if (storedUsername) {
+      setUsername(storedUsername);
+      setNewUsername(storedUsername);
+    }
   }, []);
 
   const handleSave = () => {
@@ -278,6 +293,105 @@ export function SettingsPage() {
           <p>当前生效地址: <code className="bg-muted px-1 py-0.5 rounded">{getApiBaseUrl()}</code></p>
           <p>默认地址: <code className="bg-muted px-1 py-0.5 rounded">{DEFAULT_API_URL}</code></p>
         </div>
+
+        {/* 账户设置 */}
+        {getAuthToken() && (
+          <div className="border-t pt-4 space-y-4">
+            <h3 className="font-medium text-sm">账户设置</h3>
+            
+            {/* 用户名 */}
+            <div className="space-y-2">
+              <Label className="text-sm">用户名</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  placeholder="用户名"
+                />
+                <Button
+                  size="sm"
+                  disabled={savingUser || newUsername === username || !newUsername.trim()}
+                  onClick={async () => {
+                    setSavingUser(true);
+                    try {
+                      await updateUser({ username: newUsername.trim() });
+                      setUsername(newUsername.trim());
+                      toast.success("用户名已更新");
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "更新失败");
+                    } finally {
+                      setSavingUser(false);
+                    }
+                  }}
+                >
+                  保存
+                </Button>
+              </div>
+            </div>
+
+            {/* 修改密码 */}
+            <div className="space-y-2">
+              <Label className="text-sm">修改密码</Label>
+              <Input
+                type="password"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                placeholder="当前密码"
+              />
+              <Input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="新密码"
+              />
+              <Input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="确认新密码"
+              />
+              <Button
+                size="sm"
+                className="w-full"
+                disabled={savingUser || !oldPassword || !newPassword || newPassword !== confirmPassword}
+                onClick={async () => {
+                  if (newPassword !== confirmPassword) {
+                    toast.error("两次输入的密码不一致");
+                    return;
+                  }
+                  setSavingUser(true);
+                  try {
+                    await updateUser({ old_password: oldPassword, new_password: newPassword });
+                    setOldPassword("");
+                    setNewPassword("");
+                    setConfirmPassword("");
+                    toast.success("密码已更新");
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : "更新失败");
+                  } finally {
+                    setSavingUser(false);
+                  }
+                }}
+              >
+                更新密码
+              </Button>
+            </div>
+
+            {/* 登出 */}
+            <Button
+              variant="outline"
+              className="w-full text-destructive hover:text-destructive"
+              onClick={() => {
+                clearAuthToken();
+                toast.success("已登出");
+                window.location.reload();
+              }}
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              登出
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

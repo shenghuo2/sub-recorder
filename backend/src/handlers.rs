@@ -537,3 +537,113 @@ fn ts_to_date(ts_ms: i64) -> String {
         .map(|dt| dt.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "2025-01-01".to_string())
 }
+
+// ========== 鉴权 ==========
+
+#[derive(serde::Deserialize)]
+pub struct LoginRequest {
+    pub password: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct LoginResponse {
+    pub token: String,
+    pub username: String,
+    pub require_auth: bool,
+}
+
+pub async fn login(
+    state: web::Data<AppState>,
+    body: web::Json<LoginRequest>,
+) -> HttpResponse {
+    use crate::auth::is_auth_disabled;
+    
+    // 如果禁用鉴权，直接返回成功
+    if is_auth_disabled() {
+        return HttpResponse::Ok().json(ApiResponse::ok(LoginResponse {
+            token: String::new(),
+            username: "Guest".to_string(),
+            require_auth: false,
+        }));
+    }
+    
+    let conn = state.db.lock().unwrap();
+    
+    // 验证密码
+    if db::verify_password(&conn, &body.password) {
+        // 获取用户信息
+        let user = db::get_user(&conn).ok().flatten();
+        let username = user.as_ref().map(|u| u.username.clone()).unwrap_or_else(|| "admin".to_string());
+        let token = user.map(|u| u.password_hash).unwrap_or_default();
+        
+        HttpResponse::Ok().json(ApiResponse::ok(LoginResponse {
+            token,
+            username,
+            require_auth: true,
+        }))
+    } else {
+        HttpResponse::Unauthorized().json(ApiResponse::<()>::err("密码错误"))
+    }
+}
+
+pub async fn check_auth() -> HttpResponse {
+    use crate::auth::is_auth_disabled;
+    
+    let require_auth = !is_auth_disabled();
+    HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({
+        "require_auth": require_auth
+    })))
+}
+
+#[derive(serde::Serialize)]
+pub struct UserInfo {
+    pub username: String,
+}
+
+pub async fn get_user_info(state: web::Data<AppState>) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::get_user(&conn) {
+        Ok(Some(user)) => HttpResponse::Ok().json(ApiResponse::ok(UserInfo {
+            username: user.username,
+        })),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::<()>::err("用户不存在")),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpdateUserRequest {
+    pub username: Option<String>,
+    pub old_password: Option<String>,
+    pub new_password: Option<String>,
+}
+
+pub async fn update_user(
+    state: web::Data<AppState>,
+    body: web::Json<UpdateUserRequest>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    
+    // 如果要修改密码，需要验证旧密码
+    if body.new_password.is_some() {
+        let old_pwd = body.old_password.as_deref().unwrap_or("");
+        if !db::verify_password(&conn, old_pwd) {
+            return HttpResponse::BadRequest().json(ApiResponse::<()>::err("旧密码错误"));
+        }
+    }
+    
+    match db::update_user(&conn, body.username.as_deref(), body.new_password.as_deref()) {
+        Ok(_) => {
+            // 返回新的用户信息和 token
+            if let Ok(Some(user)) = db::get_user(&conn) {
+                HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({
+                    "username": user.username,
+                    "token": user.password_hash,
+                })))
+            } else {
+                HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true})))
+            }
+        }
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
