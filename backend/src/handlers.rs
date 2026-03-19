@@ -701,3 +701,86 @@ pub async fn update_user(
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
     }
 }
+
+// ========== SMTP 配置 ==========
+
+pub async fn get_smtp_config(state: web::Data<AppState>) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::get_smtp_config(&conn) {
+        Some(mut cfg) => {
+            // 隐藏密码，只返回是否已设置
+            cfg.password = if cfg.password.is_empty() { "".to_string() } else { "********".to_string() };
+            HttpResponse::Ok().json(ApiResponse::ok(cfg))
+        }
+        None => HttpResponse::InternalServerError().json(ApiResponse::<()>::err("获取配置失败")),
+    }
+}
+
+pub async fn update_smtp_config(
+    state: web::Data<AppState>,
+    body: web::Json<UpdateSmtpConfig>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::update_smtp_config(&conn, &body) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true}))),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+pub async fn test_smtp(body: web::Json<TestSmtpRequest>) -> HttpResponse {
+    use mail_send::{SmtpClientBuilder, mail_builder::MessageBuilder};
+    
+    let message = MessageBuilder::new()
+        .from((body.from_name.as_str(), body.from_email.as_str()))
+        .to(body.to_email.as_str())
+        .subject("Sub Recorder 邮件测试")
+        .text_body("这是一封测试邮件，如果您收到此邮件，说明 SMTP 配置正确。");
+
+    let creds = (body.username.clone(), body.password.clone());
+    
+    // 端口 465 使用 implicit TLS (SSL/TLS)，其他端口使用 STARTTLS
+    let use_implicit_tls = body.port == 465;
+    
+    log::info!("Testing SMTP: {}:{} (TLS: {}, Implicit: {})", body.host, body.port, body.use_tls, use_implicit_tls);
+    
+    let result = if body.use_tls {
+        SmtpClientBuilder::new(body.host.clone(), body.port as u16)
+            .implicit_tls(use_implicit_tls)
+            .credentials(creds)
+            .connect()
+            .await
+    } else {
+        SmtpClientBuilder::new(body.host.clone(), body.port as u16)
+            .implicit_tls(false)
+            .allow_invalid_certs()
+            .credentials(creds)
+            .connect()
+            .await
+    };
+
+    match result {
+        Ok(mut client) => {
+            log::info!("SMTP connected, sending test email");
+            match client.send(message).await {
+                Ok(_) => {
+                    log::info!("Test email sent successfully");
+                    HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试邮件已发送"})))
+                }
+                Err(e) => {
+                    log::error!("Failed to send email: {}", e);
+                    let err_msg = format!("发送失败: {}。提示：请检查发件人邮箱、收件人邮箱是否正确，以及 SMTP 服务器是否支持当前配置", e);
+                    HttpResponse::BadRequest().json(ApiResponse::<()>::err(err_msg))
+                }
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to connect to SMTP server: {}", e);
+            let err_msg = if e.to_string().contains("Unparseable") {
+                format!("连接失败: SMTP 服务器响应格式异常。建议：1) 检查端口是否正确（常用：25/465/587）；2) 尝试切换 TLS 设置；3) 确认 SMTP 服务器地址正确")
+            } else {
+                format!("连接失败: {}。请检查服务器地址、端口、用户名和密码", e)
+            };
+            HttpResponse::BadRequest().json(ApiResponse::<()>::err(err_msg))
+        }
+    }
+}

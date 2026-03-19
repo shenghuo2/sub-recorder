@@ -23,6 +23,23 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
   today.setHours(0, 0, 0, 0);
   const isExpired = sub.end_date ? new Date(sub.end_date) < today : false;
 
+  // Check if subscription is due soon (for reminder highlight)
+  const isDueSoon = (() => {
+    if (!sub.is_reminder_enabled || !sub.next_bill_date || sub.is_suspended || isExpired) return false;
+    const nextBill = new Date(sub.next_bill_date);
+    nextBill.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((nextBill.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Check based on reminder_type
+    switch (sub.reminder_type) {
+      case "same_day": return diffDays === 0;
+      case "one_day": return diffDays <= 1 && diffDays >= 0;
+      case "three_days": return diffDays <= 3 && diffDays >= 0;
+      case "one_week": return diffDays <= 7 && diffDays >= 0;
+      default: return diffDays <= 1 && diffDays >= 0;
+    }
+  })();
+
   // Currency conversion
   const convertEnabled = getCurrencyConvertEnabled();
   const targetCurrency = getTargetCurrency();
@@ -100,7 +117,7 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
 
   return (
     <div
-      className={`flex items-center gap-3 md:gap-4 rounded-xl p-3 md:p-4 cursor-pointer transition-transform hover:scale-[1.01] active:scale-[0.99] shadow-sm ${isExpired ? "opacity-60" : ""}`}
+      className={`flex items-center gap-3 md:gap-4 rounded-xl p-3 md:p-4 cursor-pointer transition-transform hover:scale-[1.01] active:scale-[0.99] shadow-sm ${isExpired ? "opacity-60" : ""} ${isDueSoon ? "ring-2 ring-orange-500 ring-offset-2" : ""}`}
       style={{ backgroundColor: bgColor, color: textColor }}
       onClick={onClick}
     >
@@ -133,6 +150,11 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
             <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-white/20 border-0 shrink-0" style={{ color: textColor }}>
               <Pause className="h-3 w-3 mr-0.5" />
               已暂停
+            </Badge>
+          )}
+          {isDueSoon && !isExpired && !sub.is_suspended && (
+            <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-orange-500 text-white border-0 shrink-0 animate-pulse">
+              即将到期
             </Badge>
           )}
         </div>

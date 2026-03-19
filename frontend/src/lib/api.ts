@@ -328,3 +328,47 @@ export async function updateScene(id: string, data: Record<string, unknown>): Pr
 export async function deleteScene(id: string): Promise<void> {
   return request<void>(`/api/scenes/${id}`, { method: "DELETE" });
 }
+
+// ========== SMTP 配置 ==========
+
+export interface SmtpConfig {
+  id: number;
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  from_email: string;
+  from_name: string;
+  to_email: string;
+  use_tls: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getSmtpConfig(): Promise<SmtpConfig> {
+  return request<SmtpConfig>("/api/smtp/config");
+}
+
+export async function updateSmtpConfig(data: Partial<SmtpConfig>): Promise<void> {
+  return request<void>("/api/smtp/config", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function testSmtp(data: {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  from_email: string;
+  from_name: string;
+  to_email: string;
+  use_tls: boolean;
+}): Promise<{ success: boolean; message: string }> {
+  return request<{ success: boolean; message: string }>("/api/smtp/test", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}

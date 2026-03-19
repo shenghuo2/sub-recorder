@@ -77,6 +77,23 @@ pub fn init_db(conn: &Connection) {
             show_sub_logos INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS smtp_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            enabled INTEGER NOT NULL DEFAULT 0,
+            host TEXT NOT NULL DEFAULT '',
+            port INTEGER NOT NULL DEFAULT 587,
+            username TEXT NOT NULL DEFAULT '',
+            password TEXT NOT NULL DEFAULT '',
+            from_email TEXT NOT NULL DEFAULT '',
+            from_name TEXT NOT NULL DEFAULT 'Sub Recorder',
+            to_email TEXT NOT NULL DEFAULT '',
+            use_tls INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT OR IGNORE INTO smtp_config (id) VALUES (1);
     ").expect("Failed to initialize database");
 
     // Migration: add should_be_tinted column if not exists
@@ -1108,6 +1125,84 @@ pub fn update_user(conn: &Connection, username: Option<&str>, password: Option<&
         )?;
     }
     Ok(true)
+}
+
+// ========== SMTP 配置 ==========
+
+pub fn get_smtp_config(conn: &Connection) -> Option<SmtpConfig> {
+    conn.query_row(
+        "SELECT id, enabled, host, port, username, password, from_email, from_name, to_email, use_tls, created_at, updated_at FROM smtp_config WHERE id = 1",
+        [],
+        |row| {
+            Ok(SmtpConfig {
+                id: row.get(0)?,
+                enabled: row.get::<_, i32>(1)? != 0,
+                host: row.get(2)?,
+                port: row.get(3)?,
+                username: row.get(4)?,
+                password: row.get(5)?,
+                from_email: row.get(6)?,
+                from_name: row.get(7)?,
+                to_email: row.get(8)?,
+                use_tls: row.get::<_, i32>(9)? != 0,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        },
+    ).ok()
+}
+
+pub fn update_smtp_config(conn: &Connection, cfg: &UpdateSmtpConfig) -> rusqlite::Result<()> {
+    let mut updates = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    
+    if let Some(enabled) = cfg.enabled {
+        updates.push("enabled = ?");
+        values.push(Box::new(if enabled { 1 } else { 0 }));
+    }
+    if let Some(ref host) = cfg.host {
+        updates.push("host = ?");
+        values.push(Box::new(host.clone()));
+    }
+    if let Some(port) = cfg.port {
+        updates.push("port = ?");
+        values.push(Box::new(port));
+    }
+    if let Some(ref username) = cfg.username {
+        updates.push("username = ?");
+        values.push(Box::new(username.clone()));
+    }
+    if let Some(ref password) = cfg.password {
+        updates.push("password = ?");
+        values.push(Box::new(password.clone()));
+    }
+    if let Some(ref from_email) = cfg.from_email {
+        updates.push("from_email = ?");
+        values.push(Box::new(from_email.clone()));
+    }
+    if let Some(ref from_name) = cfg.from_name {
+        updates.push("from_name = ?");
+        values.push(Box::new(from_name.clone()));
+    }
+    if let Some(ref to_email) = cfg.to_email {
+        updates.push("to_email = ?");
+        values.push(Box::new(to_email.clone()));
+    }
+    if let Some(use_tls) = cfg.use_tls {
+        updates.push("use_tls = ?");
+        values.push(Box::new(if use_tls { 1 } else { 0 }));
+    }
+    
+    if updates.is_empty() {
+        return Ok(());
+    }
+    
+    updates.push("updated_at = datetime('now')");
+    let sql = format!("UPDATE smtp_config SET {} WHERE id = 1", updates.join(", "));
+    
+    let params: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    conn.execute(&sql, params.as_slice())?;
+    Ok(())
 }
 
 // ========== 辅助函数 ==========

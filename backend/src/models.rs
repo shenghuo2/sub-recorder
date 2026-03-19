@@ -451,3 +451,46 @@ pub struct SubscriptionDetail {
     /// 所有当前有效的账单记录摘要
     pub effective_records: Vec<EffectiveRecord>,
 }
+
+// ========== SMTP 配置 ==========
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmtpConfig {
+    pub id: i64,
+    pub enabled: bool,
+    pub host: String,
+    pub port: i32,
+    pub username: String,
+    pub password: String,
+    pub from_email: String,
+    pub from_name: String,
+    pub to_email: String,
+    pub use_tls: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSmtpConfig {
+    pub enabled: Option<bool>,
+    pub host: Option<String>,
+    pub port: Option<i32>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub from_email: Option<String>,
+    pub from_name: Option<String>,
+    pub to_email: Option<String>,
+    pub use_tls: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestSmtpRequest {
+    pub host: String,
+    pub port: i32,
+    pub username: String,
+    pub password: String,
+    pub from_email: String,
+    pub from_name: String,
+    pub to_email: String,
+    pub use_tls: bool,
+}
