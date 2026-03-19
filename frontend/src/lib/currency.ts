@@ -90,34 +90,34 @@ interface ExchangeRates {
 const RATE_CACHE_KEY = "sub_recorder_exchange_rates";
 const RATE_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
-// 内置 fallback 汇率 (基于 CNY，大致汇率)
+// 内置 fallback 汇率 (基于 CNY，表示 1 外币 = X CNY)
 const FALLBACK_RATES: Record<string, number> = {
   CNY: 1,
-  USD: 0.137,
-  EUR: 0.126,
-  GBP: 0.108,
-  JPY: 20.6,
-  KRW: 189,
-  INR: 11.5,
-  RUB: 12.6,
-  HKD: 1.07,
-  TWD: 4.42,
-  CAD: 0.19,
-  AUD: 0.21,
-  SGD: 0.184,
-  THB: 4.72,
-  VND: 3450,
-  MYR: 0.61,
-  PHP: 7.8,
-  TRY: 5.0,
-  BRL: 0.79,
-  CHF: 0.121,
-  SEK: 1.42,
-  NOK: 1.46,
-  DKK: 0.94,
-  PLN: 0.55,
-  NZD: 0.23,
-  NGN: 63.5,
+  USD: 7.3,      // 1 USD ≈ 7.3 CNY
+  EUR: 7.9,      // 1 EUR ≈ 7.9 CNY
+  GBP: 9.2,      // 1 GBP ≈ 9.2 CNY
+  JPY: 0.048,    // 1 JPY ≈ 0.048 CNY
+  KRW: 0.0053,   // 1 KRW ≈ 0.0053 CNY
+  INR: 0.087,    // 1 INR ≈ 0.087 CNY
+  RUB: 0.079,    // 1 RUB ≈ 0.079 CNY
+  HKD: 0.93,     // 1 HKD ≈ 0.93 CNY
+  TWD: 0.23,     // 1 TWD ≈ 0.23 CNY
+  CAD: 5.3,      // 1 CAD ≈ 5.3 CNY
+  AUD: 4.8,      // 1 AUD ≈ 4.8 CNY
+  SGD: 5.4,      // 1 SGD ≈ 5.4 CNY
+  THB: 0.21,     // 1 THB ≈ 0.21 CNY
+  VND: 0.00029,  // 1 VND ≈ 0.00029 CNY
+  MYR: 1.64,     // 1 MYR ≈ 1.64 CNY
+  PHP: 0.13,     // 1 PHP ≈ 0.13 CNY
+  TRY: 0.20,     // 1 TRY ≈ 0.20 CNY
+  BRL: 1.27,     // 1 BRL ≈ 1.27 CNY
+  CHF: 8.3,      // 1 CHF ≈ 8.3 CNY
+  SEK: 0.70,     // 1 SEK ≈ 0.70 CNY
+  NOK: 0.68,     // 1 NOK ≈ 0.68 CNY
+  DKK: 1.06,     // 1 DKK ≈ 1.06 CNY
+  PLN: 1.82,     // 1 PLN ≈ 1.82 CNY
+  NZD: 4.3,      // 1 NZD ≈ 4.3 CNY
+  NGN: 0.016,    // 1 NGN ≈ 0.016 CNY
 };
 
 function getCachedRates(): ExchangeRates | null {
@@ -181,4 +181,13 @@ export function convertCurrency(
   const toRate = to === base ? 1 : rates[to];
   if (!fromRate || !toRate) return amount;
   return (amount / fromRate) * toRate;
+}
+
+export function getCurrentExchangeRates(): ExchangeRates | null {
+  return getCachedRates();
+}
+
+export function clearExchangeRatesCache(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(RATE_CACHE_KEY);
 }

@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig } from "@/lib/currency";
+import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig, fetchExchangeRates, getCurrentExchangeRates, clearExchangeRatesCache } from "@/lib/currency";
 import { clearAuthToken, getAuthToken, getStoredUsername, updateUser } from "@/lib/api";
 
 const API_URL_KEY = "sub_recorder_api_url";
@@ -74,6 +74,10 @@ export function SettingsPage() {
   const [cycleFormat, setCycleFormat] = useState<"zh" | "en">("zh");
   const [normalizeCycle, setNormalizeCycle] = useState("auto");
 
+  // 汇率管理
+  const [exchangeRateInfo, setExchangeRateInfo] = useState<string>("");
+  const [refreshingRates, setRefreshingRates] = useState(false);
+
   // 用户账户
   const [username, setUsername] = useState("");
   const [newUsername, setNewUsername] = useState("");
@@ -81,6 +85,22 @@ export function SettingsPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingUser, setSavingUser] = useState(false);
+
+  const loadExchangeRateInfo = () => {
+    const rates = getCurrentExchangeRates();
+    if (rates) {
+      const date = rates.updatedAt === "fallback" 
+        ? "内置汇率" 
+        : new Date(rates.updatedAt).toLocaleString("zh-CN");
+      const sampleRates = ["USD", "EUR", "JPY", "GBP"].map(cur => {
+        const rate = rates.rates[cur];
+        return rate ? `${cur}: ${rate.toFixed(4)}` : null;
+      }).filter(Boolean).join(", ");
+      setExchangeRateInfo(`${date} | ${sampleRates}`);
+    } else {
+      setExchangeRateInfo("未加载");
+    }
+  };
 
   useEffect(() => {
     const stored = localStorage.getItem(API_URL_KEY);
@@ -91,6 +111,7 @@ export function SettingsPage() {
     setDecimals(getCurrencyDecimals());
     setCycleFormat(getCycleFormat());
     setNormalizeCycle(getNormalizeCycle());
+    loadExchangeRateInfo();
     // 加载用户名
     const storedUsername = getStoredUsername();
     if (storedUsername) {
@@ -114,6 +135,20 @@ export function SettingsPage() {
     localStorage.removeItem(API_URL_KEY);
     setApiUrl("");
     toast.info("已切换到代理模式（默认）");
+  };
+
+  const handleRefreshRates = async () => {
+    setRefreshingRates(true);
+    try {
+      clearExchangeRatesCache();
+      const rates = await fetchExchangeRates(targetCurrency);
+      loadExchangeRateInfo();
+      toast.success(`汇率已更新 (基于 ${rates.base})`);
+    } catch (e: unknown) {
+      toast.error("更新失败: " + (e instanceof Error ? e.message : "未知错误"));
+    } finally {
+      setRefreshingRates(false);
+    }
   };
 
   const handleTest = async () => {
@@ -234,6 +269,27 @@ export function SettingsPage() {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Exchange Rate Info */}
+          {convertEnabled && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">汇率信息</Label>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={handleRefreshRates}
+                  disabled={refreshingRates}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 mr-1 ${refreshingRates ? "animate-spin" : ""}`} />
+                  {refreshingRates ? "更新中..." : "刷新汇率"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground font-mono">
+                {exchangeRateInfo || "加载中..."}
+              </p>
+            </div>
+          )}
 
           {/* Decimal Places */}
           <div className="space-y-2">
