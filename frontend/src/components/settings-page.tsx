@@ -18,7 +18,6 @@ import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig } from "@/lib/curren
 import { clearAuthToken, getAuthToken, getStoredUsername, updateUser } from "@/lib/api";
 
 const API_URL_KEY = "sub_recorder_api_url";
-const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456";
 
 // Currency conversion settings keys
 const CURRENCY_CONVERT_ENABLED_KEY = "sub_recorder_currency_convert_enabled";
@@ -28,8 +27,11 @@ const CYCLE_FORMAT_KEY = "sub_recorder_cycle_format"; // "zh" or "en"
 const NORMALIZE_CYCLE_KEY = "sub_recorder_normalize_cycle"; // billing cycle for normalization, e.g. "month_1"
 
 export function getApiBaseUrl(): string {
-  if (typeof window === "undefined") return DEFAULT_API_URL;
-  return localStorage.getItem(API_URL_KEY) || DEFAULT_API_URL;
+  if (typeof window === "undefined") return "";
+  const stored = localStorage.getItem(API_URL_KEY);
+  // null 表示未设置，返回空字符串（代理模式）
+  // 空字符串表示用户明确选择代理模式
+  return stored ?? "";
 }
 
 export function getCurrencyConvertEnabled(): boolean {
@@ -61,7 +63,7 @@ export function getNormalizeCycle(): string {
 }
 
 export function SettingsPage() {
-  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
+  const [apiUrl, setApiUrl] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "fail" | null>(null);
 
@@ -81,7 +83,9 @@ export function SettingsPage() {
   const [savingUser, setSavingUser] = useState(false);
 
   useEffect(() => {
-    setApiUrl(getApiBaseUrl());
+    const stored = localStorage.getItem(API_URL_KEY);
+    // 显示实际存储的值，空字符串显示占位符提示
+    setApiUrl(stored ?? "");
     setConvertEnabled(getCurrencyConvertEnabled());
     setTargetCurrency(getTargetCurrency());
     setDecimals(getCurrencyDecimals());
@@ -99,13 +103,17 @@ export function SettingsPage() {
     const trimmed = apiUrl.trim().replace(/\/+$/, "");
     localStorage.setItem(API_URL_KEY, trimmed);
     setApiUrl(trimmed);
-    toast.success("API 地址已保存，刷新页面后生效");
+    if (trimmed === "") {
+      toast.success("已切换到代理模式，刷新页面后生效");
+    } else {
+      toast.success("API 地址已保存，刷新页面后生效");
+    }
   };
 
   const handleReset = () => {
     localStorage.removeItem(API_URL_KEY);
-    setApiUrl(DEFAULT_API_URL);
-    toast.info("已恢复默认地址");
+    setApiUrl("");
+    toast.info("已切换到代理模式（默认）");
   };
 
   const handleTest = async () => {
@@ -113,7 +121,13 @@ export function SettingsPage() {
     setTestResult(null);
     try {
       const trimmed = apiUrl.trim().replace(/\/+$/, "");
-      const res = await fetch(`${trimmed}/api/categories`, { method: "GET" });
+      // 如果是空或默认代理模式，测试 /api/auth/check
+      // 否则测试用户配置的地址
+      const testUrl = trimmed ? `${trimmed}/api/auth/check` : "/api/auth/check";
+      const res = await fetch(testUrl, { 
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
       if (res.ok) {
         setTestResult("ok");
         toast.success("连接成功");
@@ -123,7 +137,13 @@ export function SettingsPage() {
       }
     } catch (e: unknown) {
       setTestResult("fail");
-      toast.error("连接失败: " + (e instanceof Error ? e.message : "网络错误"));
+      const msg = e instanceof Error ? e.message : "网络错误";
+      // 提示 CORS 问题
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        toast.error("连接失败: 可能是 CORS 限制，建议使用代理模式（留空地址）");
+      } else {
+        toast.error("连接失败: " + msg);
+      }
     } finally {
       setTesting(false);
     }
@@ -141,12 +161,12 @@ export function SettingsPage() {
             后端 API 地址
           </div>
           <Label className="text-xs text-muted-foreground">
-            设置后端服务的地址，修改后需刷新页面
+            留空使用代理模式（Docker 部署推荐），或填写后端地址直连
           </Label>
           <Input
             value={apiUrl}
             onChange={(e) => { setApiUrl(e.target.value); setTestResult(null); }}
-            placeholder="http://localhost:3456"
+            placeholder="留空 = 代理模式，或填写 http://localhost:3456"
             className="font-mono text-sm"
           />
           <div className="flex gap-2">
@@ -290,8 +310,8 @@ export function SettingsPage() {
 
         {/* Info */}
         <div className="text-xs text-muted-foreground space-y-1 px-1">
-          <p>当前生效地址: <code className="bg-muted px-1 py-0.5 rounded">{getApiBaseUrl()}</code></p>
-          <p>默认地址: <code className="bg-muted px-1 py-0.5 rounded">{DEFAULT_API_URL}</code></p>
+          <p>当前生效地址: <code className="bg-muted px-1 py-0.5 rounded">{getApiBaseUrl() || "（代理模式）"}</code></p>
+          <p>默认模式: <code className="bg-muted px-1 py-0.5 rounded">代理模式（留空）</code></p>
         </div>
 
         {/* 账户设置 */}

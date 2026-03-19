@@ -312,6 +312,20 @@ pub struct UploadIconFromUrl {
     pub url: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchImageRequest {
+    /// 图片 URL
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchImageResponse {
+    /// base64 编码的图片数据
+    pub data: String,
+    /// MIME type
+    pub mime_type: String,
+}
+
 // ========== 场景 ==========
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

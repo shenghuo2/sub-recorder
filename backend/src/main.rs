@@ -13,7 +13,24 @@ use std::sync::Mutex;
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
+    let args: Vec<String> = std::env::args().collect();
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "sub_recorder.db".to_string());
+
+    // 命令行重置密码
+    if args.iter().any(|a| a == "--reset-password") {
+        let conn = Connection::open(&db_path).expect("Failed to open database");
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;").ok();
+        db::init_db(&conn);
+        let new_password = db::generate_random_password();
+        db::update_user(&conn, None, Some(&new_password)).expect("Failed to reset password");
+        println!("========================================");
+        println!("密码已重置");
+        println!("用户名: admin");
+        println!("新密码: {}", new_password);
+        println!("========================================");
+        return Ok(());
+    }
+
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -76,6 +93,8 @@ async fn main() -> std::io::Result<()> {
             .route("/api/auth/check", web::get().to(handlers::check_auth))
             .route("/api/auth/user", web::get().to(handlers::get_user_info))
             .route("/api/auth/user", web::put().to(handlers::update_user))
+            // 图片代理
+            .route("/api/fetch-image", web::post().to(handlers::fetch_image))
     })
     .bind(("0.0.0.0", port))?
     .run()

@@ -5,10 +5,10 @@ function getApiBase(): string {
     const stored = localStorage.getItem("sub_recorder_api_url");
     if (stored) return stored;
   }
-  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456";
+  // 默认使用相对路径（通过 Next.js API 路由代理）
+  // 开发时可设置 NEXT_PUBLIC_API_URL=http://localhost:3456 直连后端
+  return process.env.NEXT_PUBLIC_API_URL || "";
 }
-
-const API_BASE = typeof window !== "undefined" ? getApiBase() : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3456");
 
 // ========== 鉴权相关 ==========
 
@@ -40,7 +40,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers["Authorization"] = `Bearer ${token}`;
   }
   
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${getApiBase()}${path}`, {
     ...options,
     headers,
   });
@@ -218,6 +218,13 @@ export async function uploadIconFromUrl(id: string, url: string): Promise<void> 
   });
 }
 
+export async function fetchImage(url: string): Promise<{ data: string; mime_type: string }> {
+  return request<{ data: string; mime_type: string }>("/api/fetch-image", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
 export async function importData(data: unknown[]): Promise<string> {
   return request<string>("/api/import", {
     method: "POST",
@@ -226,7 +233,7 @@ export async function importData(data: unknown[]): Promise<string> {
 }
 
 export function getIconUrl(id: string): string {
-  return `${API_BASE}/api/subscriptions/${id}/icon`;
+  return `${getApiBase()}/api/subscriptions/${id}/icon`;
 }
 
 // ========== 账单记录 ==========

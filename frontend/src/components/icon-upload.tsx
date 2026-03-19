@@ -173,39 +173,24 @@ export function IconUpload({ subscriptionId, currentIcon, currentMimeType, onUpd
       return;
     }
 
-    if (!subscriptionId) {
-      // Create mode: fetch the image and convert to base64
-      setUploading(true);
-      try {
-        const resp = await fetch(url.trim());
-        const blob = await resp.blob();
-        const mime = blob.type || "image/png";
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          const b64 = dataUrl.split(",")[1];
-          onUpdated(b64, mime);
-          setDialogOpen(false);
-          setUrl("");
-        };
-        reader.readAsDataURL(blob);
-      } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "获取失败");
-      } finally {
-        setUploading(false);
-      }
-      return;
-    }
-
     setUploading(true);
     try {
-      await api.uploadIconFromUrl(subscriptionId, url.trim());
-      toast.success("图标已更新");
-      setDialogOpen(false);
-      setUrl("");
-      onUpdated();
+      if (!subscriptionId) {
+        // Create mode: use backend proxy to fetch image
+        const result = await api.fetchImage(url.trim());
+        onUpdated(result.data, result.mime_type);
+        setDialogOpen(false);
+        setUrl("");
+      } else {
+        // Edit mode: let backend fetch and save directly
+        await api.uploadIconFromUrl(subscriptionId, url.trim());
+        toast.success("图标已更新");
+        setDialogOpen(false);
+        setUrl("");
+        onUpdated();
+      }
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "上传失败");
+      toast.error(e instanceof Error ? e.message : "获取失败");
     } finally {
       setUploading(false);
     }

@@ -538,6 +538,60 @@ fn ts_to_date(ts_ms: i64) -> String {
         .unwrap_or_else(|| "2025-01-01".to_string())
 }
 
+// ========== 图片代理 ==========
+
+pub async fn fetch_image(
+    body: web::Json<FetchImageRequest>,
+) -> HttpResponse {
+    let client = reqwest::Client::new();
+    let resp = match client.get(&body.url).send().await {
+        Ok(r) => r,
+        Err(e) => return HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("下载失败: {}", e))),
+    };
+
+    if !resp.status().is_success() {
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("下载失败: HTTP {}", resp.status())));
+    }
+
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/png")
+        .to_string();
+
+    let mime = if content_type.contains("svg") {
+        "image/svg+xml"
+    } else if content_type.contains("webp") {
+        "image/webp"
+    } else if content_type.contains("jpeg") || content_type.contains("jpg") {
+        "image/jpeg"
+    } else if content_type.contains("png") {
+        "image/png"
+    } else if content_type.contains("gif") {
+        "image/gif"
+    } else {
+        let url_lower = body.url.to_lowercase();
+        if url_lower.ends_with(".svg") { "image/svg+xml" }
+        else if url_lower.ends_with(".webp") { "image/webp" }
+        else if url_lower.ends_with(".jpg") || url_lower.ends_with(".jpeg") { "image/jpeg" }
+        else { "image/png" }
+    };
+
+    let bytes = match resp.bytes().await {
+        Ok(b) => b,
+        Err(e) => return HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("读取数据失败: {}", e))),
+    };
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    HttpResponse::Ok().json(ApiResponse::ok(FetchImageResponse {
+        data: b64,
+        mime_type: mime.to_string(),
+    }))
+}
+
 // ========== 鉴权 ==========
 
 #[derive(serde::Deserialize)]

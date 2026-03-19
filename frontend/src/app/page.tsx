@@ -60,7 +60,11 @@ export default function Home() {
           }
         }
       } catch {
-        // 如果检查失败，假设不需要鉴权
+        // 检查失败（后端不可达等），如果没有 token 则要求登录
+        const token = api.getAuthToken();
+        if (!token) {
+          setNeedLogin(true);
+        }
       } finally {
         setAuthChecking(false);
       }
@@ -96,7 +100,12 @@ export default function Home() {
         setScenes([]);
       }
     } catch (e: unknown) {
-      toast.error("加载失败: " + (e instanceof Error ? e.message : "未知错误"));
+      const msg = e instanceof Error ? e.message : "未知错误";
+      if (msg.includes("未授权")) {
+        // 已经由 request() 触发 auth-required 事件
+        return;
+      }
+      toast.error("加载失败: " + msg);
     } finally {
       setLoading(false);
     }
@@ -106,7 +115,11 @@ export default function Home() {
     fetchExchangeRates("CNY").then((r) => setRates(r.rates));
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!authChecking && !needLogin) {
+      refresh();
+    }
+  }, [authChecking, needLogin, refresh]);
 
   const today = useMemo(() => {
     const d = new Date();
