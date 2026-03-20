@@ -4,10 +4,21 @@ mod handlers;
 mod models;
 
 use actix_cors::Cors;
-use actix_web::{web, App, HttpServer, middleware};
+use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, middleware};
 use db::AppState;
 use rusqlite::Connection;
 use std::sync::Mutex;
+
+fn static_dir() -> String {
+    std::env::var("STATIC_DIR").unwrap_or_else(|_| "./static".to_string())
+}
+
+async fn spa_fallback(_req: HttpRequest) -> actix_web::Result<HttpResponse> {
+    let index = std::path::Path::new(&static_dir()).join("index.html");
+    let body = std::fs::read_to_string(&index)
+        .unwrap_or_else(|_| "<h1>Sub Recorder</h1><p>Frontend not found.</p>".to_string());
+    Ok(HttpResponse::Ok().content_type("text/html; charset=utf-8").body(body))
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -34,7 +45,7 @@ async fn main() -> std::io::Result<()> {
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(3456);
+        .unwrap_or(3000);
 
     let conn = Connection::open(&db_path).expect("Failed to open database");
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
@@ -102,6 +113,12 @@ async fn main() -> std::io::Result<()> {
             .route("/api/notifications/channels/{id}", web::put().to(handlers::update_notification_channel))
             .route("/api/notifications/channels/{id}", web::delete().to(handlers::delete_notification_channel))
             .route("/api/notifications/test", web::post().to(handlers::test_notification))
+            // 静态文件 + SPA fallback
+            .service(
+                actix_files::Files::new("/", static_dir())
+                    .index_file("index.html")
+                    .default_handler(web::to(spa_fallback))
+            )
     })
     .bind(("0.0.0.0", port))?
     .run()

@@ -99,7 +99,7 @@ cargo build --release 2>&1 | tail -3
 ok "后端构建完成"
 
 log "启动后端 (端口 3456)..."
-RUST_LOG=info "$BACKEND_DIR/target/release/sub-recorder" &
+PORT=3456 RUST_LOG=info "$BACKEND_DIR/target/release/sub-recorder" &
 BACKEND_PID=$!
 sleep 1
 

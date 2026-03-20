@@ -4,19 +4,15 @@ services:
     container_name: sub-recorder
     restart: unless-stopped
     ports:
-      - "3010:3000"  # 前端（后端 API 内部访问）
-      # - "3456:3456"  # 如需外部访问后端 API，取消注释
+      - "3010:3000"
     volumes:
       - ./data:/app/data
     environment:
       - DATABASE_PATH=/app/data/subscriptions.db
-      - NODE_ENV=production
-      - BACKEND_URL=http://127.0.0.1:3456
-      # 禁用鉴权（可选）
       # - DISABLE_AUTH=true
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/auth/check"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 5s

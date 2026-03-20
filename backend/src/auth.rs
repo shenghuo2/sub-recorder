@@ -79,8 +79,14 @@ where
                 return Ok(res.map_into_left_body());
             }
 
-            // 登录和检查接口不需要鉴权
+            // 只对 /api/* 路径进行鉴权，静态文件直接放行
             let path = req.path();
+            if !path.starts_with("/api/") {
+                let res = service.call(req).await?;
+                return Ok(res.map_into_left_body());
+            }
+
+            // 登录和检查接口不需要鉴权
             if path == "/api/auth/login" || path == "/api/auth/check" || path == "/api/auth/user" {
                 let res = service.call(req).await?;
                 return Ok(res.map_into_left_body());
