@@ -1,6 +1,7 @@
 "use client";
 
-import { LayoutDashboard, Settings, FolderOpen, Layers, Bell } from "lucide-react";
+import { useState } from "react";
+import { LayoutDashboard, Settings, FolderOpen, Layers, Bell, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AppLogo } from "@/components/animated-logo";
 
@@ -20,13 +21,35 @@ const NAV_ITEMS: { id: NavPage; icon: React.ElementType; label: string }[] = [
 ];
 
 export function NavSidebar({ current, onChange }: Props) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <>
       {/* Desktop: vertical sidebar */}
-      <div className="hidden md:flex flex-col items-center gap-2 py-4 px-2 border-r bg-muted/30 w-14 shrink-0">
-        {/* Logo */}
-        <div className="mb-4 select-none">
-          <AppLogo size={36} />
+      <div 
+        className={cn(
+          "hidden md:flex flex-col gap-2 py-4 px-2 border-r bg-muted/30 shrink-0 transition-all duration-200",
+          expanded ? "w-40" : "w-14"
+        )}
+      >
+        {/* Logo + Toggle */}
+        <div className={cn("mb-4 select-none flex items-center", expanded ? "justify-between px-1" : "justify-center")}>
+          <button 
+            onClick={() => setExpanded(!expanded)} 
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            title={expanded ? "收起侧边栏" : "展开侧边栏"}
+          >
+            <AppLogo size={36} />
+            {expanded && <span className="text-sm font-medium">Sub Recorder</span>}
+          </button>
+          {expanded && (
+            <button
+              onClick={() => setExpanded(false)}
+              className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {NAV_ITEMS.map((item) => {
@@ -36,18 +59,31 @@ export function NavSidebar({ current, onChange }: Props) {
             <button
               key={item.id}
               onClick={() => onChange(item.id)}
-              title={item.label}
+              title={expanded ? undefined : item.label}
               className={cn(
-                "h-9 w-9 rounded-lg flex items-center justify-center transition-colors",
+                "rounded-lg flex items-center transition-colors",
+                expanded ? "h-9 px-3 gap-3 justify-start" : "h-9 w-9 justify-center",
                 active
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
               )}
             >
-              <Icon className="h-5 w-5" />
+              <Icon className="h-5 w-5 shrink-0" />
+              {expanded && <span className="text-sm truncate">{item.label}</span>}
             </button>
           );
         })}
+
+        {/* Expand button at bottom */}
+        {!expanded && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="mt-auto h-9 w-9 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="展开侧边栏"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       {/* Mobile: bottom tab bar */}
