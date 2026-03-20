@@ -334,7 +334,7 @@ export async function deleteScene(id: string): Promise<void> {
 export interface NotificationChannel {
   id: string;
   name: string;
-  channel_type: "smtp" | "webhook";
+  channel_type: "smtp" | "onebot" | "telegram" | "webhook";
   enabled: boolean;
   config: any;
   created_at: string;
@@ -343,7 +343,7 @@ export interface NotificationChannel {
 
 export interface CreateNotificationChannel {
   name: string;
-  channel_type: "smtp" | "webhook";
+  channel_type: "smtp" | "onebot" | "telegram" | "webhook";
   enabled: boolean;
   config: any;
 }
