@@ -68,12 +68,27 @@ if [ "$NO_UPDATE" = false ] && [ -d "$SCRIPT_DIR/.git" ]; then
   git fetch --quiet 2>/dev/null || true
   LOCAL=$(git rev-parse HEAD 2>/dev/null || echo "")
   REMOTE=$(git rev-parse @{u} 2>/dev/null || echo "")
-  if [ -n "$LOCAL" ] && [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
-    warn "发现远程更新，正在拉取..."
-    git pull --rebase || { err "git pull 失败，请手动处理"; exit 1; }
-    ok "代码已更新"
-  else
+  BASE=$(git merge-base HEAD @{u} 2>/dev/null || echo "")
+  
+  if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
+    warn "无法检查远程更新（可能没有设置上游分支）"
+  elif [ "$LOCAL" = "$REMOTE" ]; then
     ok "代码已是最新"
+  elif [ "$LOCAL" = "$BASE" ]; then
+    # 本地落后于远程，需要拉取
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      warn "发现远程更新，但本地有未提交的更改，跳过自动更新"
+    else
+      warn "发现远程更新，正在拉取..."
+      git pull --rebase || { err "git pull 失败，请手动处理"; exit 1; }
+      ok "代码已更新"
+    fi
+  elif [ "$REMOTE" = "$BASE" ]; then
+    # 本地领先于远程（有未推送的 commit）
+    warn "本地有未推送的提交，跳过自动更新"
+  else
+    # 本地和远程有分叉
+    warn "本地和远程有分叉，跳过自动更新，请手动处理"
   fi
 fi
 
