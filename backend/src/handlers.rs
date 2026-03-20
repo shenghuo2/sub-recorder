@@ -747,6 +747,8 @@ pub async fn delete_notification_channel(state: web::Data<AppState>, path: web::
 pub async fn test_notification(body: web::Json<TestNotificationRequest>) -> HttpResponse {
     match body.channel_type.as_str() {
         "smtp" => do_test_smtp(&body.config).await,
+        "onebot" => do_test_onebot(&body.config).await,
+        "telegram" => do_test_telegram(&body.config).await,
         "webhook" => do_test_webhook(&body.config).await,
         _ => HttpResponse::BadRequest().json(ApiResponse::<()>::err("不支持的通知类型".to_string())),
     }
@@ -889,6 +891,111 @@ async fn do_test_webhook(config: &serde_json::Value) -> HttpResponse {
         }
         Err(e) => {
             log::error!("Webhook failed: {}", e);
+            HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("发送失败: {}", e)))
+        }
+    }
+}
+
+// OneBot 独立测试函数
+async fn do_test_onebot(config: &serde_json::Value) -> HttpResponse {
+    let url = config.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    let access_token = config.get("access_token").and_then(|v| v.as_str());
+    let message_type = config.get("message_type").and_then(|v| v.as_str()).unwrap_or("private");
+    let target_id = config.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
+
+    if url.is_empty() || target_id.is_empty() {
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::err("请填写完整的 OneBot 配置".to_string()));
+    }
+
+    let endpoint = match message_type {
+        "group" => format!("{}/send_group_msg", url.trim_end_matches('/')),
+        _ => format!("{}/send_private_msg", url.trim_end_matches('/')),
+    };
+
+    let body = match message_type {
+        "group" => serde_json::json!({
+            "group_id": target_id.parse::<i64>().unwrap_or(0),
+            "message": "Sub Recorder 测试消息\n如果您收到此消息，说明配置正确。"
+        }),
+        _ => serde_json::json!({
+            "user_id": target_id.parse::<i64>().unwrap_or(0),
+            "message": "Sub Recorder 测试消息\n如果您收到此消息，说明配置正确。"
+        }),
+    };
+
+    log::info!("Testing OneBot: {} message_type={}", endpoint, message_type);
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&endpoint);
+
+    if let Some(token) = access_token {
+        if !token.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+    }
+
+    req = req.json(&body);
+
+    match req.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试消息已发送"})))
+            } else {
+                let body_text = resp.text().await.unwrap_or_default();
+                log::error!("OneBot error: {} {}", status, body_text);
+                HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("OneBot 返回 {}: {}", status, body_text)))
+            }
+        }
+        Err(e) => {
+            log::error!("OneBot failed: {}", e);
+            HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("发送失败: {}", e)))
+        }
+    }
+}
+
+// Telegram 独立测试函数
+async fn do_test_telegram(config: &serde_json::Value) -> HttpResponse {
+    let bot_token = config.get("bot_token").and_then(|v| v.as_str()).unwrap_or("");
+    let chat_id = config.get("chat_id").and_then(|v| v.as_str()).unwrap_or("");
+    let silent = config.get("silent").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    if bot_token.is_empty() || chat_id.is_empty() {
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::err("请填写完整的 Telegram 配置".to_string()));
+    }
+
+    let url = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
+    let body = serde_json::json!({
+        "chat_id": chat_id,
+        "text": "Sub Recorder 测试消息\n如果您收到此消息，说明配置正确。",
+        "disable_notification": silent
+    });
+
+    log::info!("Testing Telegram: chat_id={} silent={}", chat_id, silent);
+
+    let client = reqwest::Client::new();
+    let req = client.post(&url).json(&body);
+
+    match req.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            let body_text = resp.text().await.unwrap_or_default();
+            
+            if status.is_success() {
+                let json: serde_json::Value = serde_json::from_str(&body_text).unwrap_or_default();
+                if json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试消息已发送"})))
+                } else {
+                    let desc = json.get("description").and_then(|v| v.as_str()).unwrap_or("未知错误");
+                    HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("Telegram 错误: {}", desc)))
+                }
+            } else {
+                log::error!("Telegram error: {} {}", status, body_text);
+                HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("Telegram 返回 {}", status)))
+            }
+        }
+        Err(e) => {
+            log::error!("Telegram failed: {}", e);
             HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("发送失败: {}", e)))
         }
     }
