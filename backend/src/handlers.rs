@@ -813,11 +813,57 @@ async fn do_test_webhook(config: &serde_json::Value) -> HttpResponse {
     log::info!("Testing webhook: {} type={}", cfg.url, cfg.webhook_type);
 
     let client = reqwest::Client::new();
-    let mut req = match cfg.method.to_uppercase().as_str() {
-        "GET" => client.get(&cfg.url),
-        _ => client.post(&cfg.url),
+
+    // 构建 OneBot URL 和请求
+    let (url, body) = if cfg.webhook_type == "onebot" {
+        let message_type = cfg.message_type.as_deref().unwrap_or("private");
+        let target_id = cfg.target_id.as_deref().unwrap_or("");
+        
+        if target_id.is_empty() {
+            return HttpResponse::BadRequest().json(ApiResponse::<()>::err("请填写目标 QQ 号或群号".to_string()));
+        }
+
+        let endpoint = match message_type {
+            "group" => format!("{}/send_group_msg", cfg.url.trim_end_matches('/')),
+            _ => format!("{}/send_private_msg", cfg.url.trim_end_matches('/')),
+        };
+
+        let body = match message_type {
+            "group" => serde_json::json!({
+                "group_id": target_id.parse::<i64>().unwrap_or(0),
+                "message": "Sub Recorder 测试消息\n如果您收到此消息，说明配置正确。"
+            }),
+            _ => serde_json::json!({
+                "user_id": target_id.parse::<i64>().unwrap_or(0),
+                "message": "Sub Recorder 测试消息\n如果您收到此消息，说明配置正确。"
+            }),
+        };
+
+        (endpoint, body)
+    } else {
+        let text = cfg.body_template
+            .replace("{title}", "Sub Recorder 测试")
+            .replace("{message}", "如果您收到此消息，说明配置正确。")
+            .replace("{subscription}", "测试订阅");
+        let body = serde_json::from_str(&text).unwrap_or(serde_json::json!({"text": text}));
+        (cfg.url.clone(), body)
     };
 
+    let mut req = match cfg.method.to_uppercase().as_str() {
+        "GET" => client.get(&url),
+        _ => client.post(&url),
+    };
+
+    // 添加 OneBot Access Token
+    if cfg.webhook_type == "onebot" {
+        if let Some(token) = &cfg.access_token {
+            if !token.is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", token));
+            }
+        }
+    }
+
+    // 添加自定义 headers
     if let Some(headers) = &cfg.headers {
         if let Some(obj) = headers.as_object() {
             for (k, v) in obj {
@@ -825,17 +871,6 @@ async fn do_test_webhook(config: &serde_json::Value) -> HttpResponse {
             }
         }
     }
-
-    let body = match cfg.webhook_type.as_str() {
-        "onebot" => serde_json::json!({"message": "Sub Recorder 测试消息\n如果您收到此消息，说明配置正确。"}),
-        _ => {
-            let text = cfg.body_template
-                .replace("{title}", "Sub Recorder 测试")
-                .replace("{message}", "如果您收到此消息，说明配置正确。")
-                .replace("{subscription}", "测试订阅");
-            serde_json::from_str(&text).unwrap_or(serde_json::json!({"text": text}))
-        }
-    };
 
     if cfg.method.to_uppercase() != "GET" {
         req = req.json(&body);

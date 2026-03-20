@@ -505,4 +505,11 @@ pub struct WebhookChannelConfig {
     pub headers: Option<serde_json::Value>,
     pub body_template: String,
     pub webhook_type: String,  // "onebot" | "custom"
+    // OneBot 专用字段
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_type: Option<String>,  // "private" | "group"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,  // user_id or group_id
 }
