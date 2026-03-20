@@ -19,6 +19,7 @@ import { CategoryFilter } from "@/components/category-filter";
 import { SortOptions, type SortField } from "@/components/sort-options";
 import { CategoryPanel } from "@/components/category-panel";
 import { SettingsPage, getNormalizeCycle, getCycleFormat } from "@/components/settings-page";
+import { NotificationsPage } from "@/components/notifications-page";
 import { fetchExchangeRates, convertCurrency } from "@/lib/currency";
 import { LoginPage } from "@/components/login-page";
 
@@ -525,6 +526,12 @@ export default function Home() {
               onRefresh={refresh}
             />
           </div>
+        </div>
+      )}
+
+      {navPage === "notifications" && (
+        <div className="flex-1 overflow-y-auto pb-20 md:pb-0">
+          <NotificationsPage />
         </div>
       )}
 

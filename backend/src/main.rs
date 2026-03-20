@@ -95,10 +95,13 @@ async fn main() -> std::io::Result<()> {
             .route("/api/auth/user", web::put().to(handlers::update_user))
             // 图片代理
             .route("/api/fetch-image", web::post().to(handlers::fetch_image))
-            // SMTP 配置
-            .route("/api/smtp/config", web::get().to(handlers::get_smtp_config))
-            .route("/api/smtp/config", web::put().to(handlers::update_smtp_config))
-            .route("/api/smtp/test", web::post().to(handlers::test_smtp))
+            // 通知渠道
+            .route("/api/notifications/channels", web::get().to(handlers::list_notification_channels))
+            .route("/api/notifications/channels", web::post().to(handlers::create_notification_channel))
+            .route("/api/notifications/channels/{id}", web::get().to(handlers::get_notification_channel))
+            .route("/api/notifications/channels/{id}", web::put().to(handlers::update_notification_channel))
+            .route("/api/notifications/channels/{id}", web::delete().to(handlers::delete_notification_channel))
+            .route("/api/notifications/test", web::post().to(handlers::test_notification))
     })
     .bind(("0.0.0.0", port))?
     .run()

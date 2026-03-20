@@ -18,3 +18,4 @@ env_logger = "0.11"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sha2 = "0.10"
 hex = "0.4"
+mail-send = "0.4"

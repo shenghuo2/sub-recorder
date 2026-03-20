@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Node
+frontend/node_modules
+frontend/.next
+frontend/.env*
+
+# Rust
+backend/target
+
+# Data
+data/
+*.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Misc
+*.md
+!README.md

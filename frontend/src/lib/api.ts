@@ -329,45 +329,61 @@ export async function deleteScene(id: string): Promise<void> {
   return request<void>(`/api/scenes/${id}`, { method: "DELETE" });
 }
 
-// ========== SMTP 配置 ==========
+// ========== 通知渠道 ==========
 
-export interface SmtpConfig {
-  id: number;
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  channel_type: "smtp" | "webhook";
   enabled: boolean;
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  from_email: string;
-  from_name: string;
-  to_email: string;
-  use_tls: boolean;
+  config: any;
   created_at: string;
   updated_at: string;
 }
 
-export async function getSmtpConfig(): Promise<SmtpConfig> {
-  return request<SmtpConfig>("/api/smtp/config");
+export interface CreateNotificationChannel {
+  name: string;
+  channel_type: "smtp" | "webhook";
+  enabled: boolean;
+  config: any;
 }
 
-export async function updateSmtpConfig(data: Partial<SmtpConfig>): Promise<void> {
-  return request<void>("/api/smtp/config", {
+export interface UpdateNotificationChannel {
+  name?: string;
+  enabled?: boolean;
+  config?: any;
+}
+
+export async function listNotificationChannels() {
+  return request<NotificationChannel[]>("/api/notifications/channels");
+}
+
+export async function getNotificationChannel(id: string) {
+  return request<NotificationChannel>(`/api/notifications/channels/${id}`);
+}
+
+export async function createNotificationChannel(data: CreateNotificationChannel) {
+  return request<{ id: string }>("/api/notifications/channels", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateNotificationChannel(id: string, data: UpdateNotificationChannel) {
+  return request<{ success: boolean }>(`/api/notifications/channels/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
 }
 
-export async function testSmtp(data: {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  from_email: string;
-  from_name: string;
-  to_email: string;
-  use_tls: boolean;
-}): Promise<{ success: boolean; message: string }> {
-  return request<{ success: boolean; message: string }>("/api/smtp/test", {
+export async function deleteNotificationChannel(id: string) {
+  return request<{ success: boolean }>(`/api/notifications/channels/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function testNotification(data: { channel_type: string; config: any }) {
+  return request<{ success: boolean; message: string }>("/api/notifications/test", {
     method: "POST",
     body: JSON.stringify(data),
   });

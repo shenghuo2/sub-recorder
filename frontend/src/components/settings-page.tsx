@@ -15,8 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig, fetchExchangeRates, getCurrentExchangeRates, clearExchangeRatesCache } from "@/lib/currency";
-import { clearAuthToken, getAuthToken, getStoredUsername, updateUser, getSmtpConfig, updateSmtpConfig, testSmtp, SmtpConfig } from "@/lib/api";
-import { Mail } from "lucide-react";
+import { clearAuthToken, getAuthToken, getStoredUsername, updateUser } from "@/lib/api";
 
 const API_URL_KEY = "sub_recorder_api_url";
 
@@ -87,18 +86,6 @@ export function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingUser, setSavingUser] = useState(false);
 
-  // SMTP 配置
-  const [smtpEnabled, setSmtpEnabled] = useState(false);
-  const [smtpHost, setSmtpHost] = useState("");
-  const [smtpPort, setSmtpPort] = useState(587);
-  const [smtpUsername, setSmtpUsername] = useState("");
-  const [smtpPassword, setSmtpPassword] = useState("");
-  const [smtpFromEmail, setSmtpFromEmail] = useState("");
-  const [smtpFromName, setSmtpFromName] = useState("Sub Recorder");
-  const [smtpToEmail, setSmtpToEmail] = useState("");
-  const [smtpUseTls, setSmtpUseTls] = useState(true);
-  const [smtpSaving, setSmtpSaving] = useState(false);
-  const [smtpTesting, setSmtpTesting] = useState(false);
 
   const loadExchangeRateInfo = () => {
     const rates = getCurrentExchangeRates();
@@ -116,22 +103,6 @@ export function SettingsPage() {
     }
   };
 
-  const loadSmtpConfig = async () => {
-    try {
-      const cfg = await getSmtpConfig();
-      setSmtpEnabled(cfg.enabled);
-      setSmtpHost(cfg.host);
-      setSmtpPort(cfg.port);
-      setSmtpUsername(cfg.username);
-      setSmtpPassword(cfg.password === "********" ? "" : cfg.password);
-      setSmtpFromEmail(cfg.from_email);
-      setSmtpFromName(cfg.from_name);
-      setSmtpToEmail(cfg.to_email);
-      setSmtpUseTls(cfg.use_tls);
-    } catch {
-      // 忽略错误
-    }
-  };
 
   useEffect(() => {
     const stored = localStorage.getItem(API_URL_KEY);
@@ -143,7 +114,6 @@ export function SettingsPage() {
     setCycleFormat(getCycleFormat());
     setNormalizeCycle(getNormalizeCycle());
     loadExchangeRateInfo();
-    loadSmtpConfig();
     // 加载用户名
     const storedUsername = getStoredUsername();
     if (storedUsername) {
@@ -183,55 +153,6 @@ export function SettingsPage() {
     }
   };
 
-  const handleSmtpSave = async () => {
-    setSmtpSaving(true);
-    try {
-      const data: Partial<SmtpConfig> = {
-        enabled: smtpEnabled,
-        host: smtpHost,
-        port: smtpPort,
-        username: smtpUsername,
-        from_email: smtpFromEmail,
-        from_name: smtpFromName,
-        to_email: smtpToEmail,
-        use_tls: smtpUseTls,
-      };
-      if (smtpPassword) {
-        data.password = smtpPassword;
-      }
-      await updateSmtpConfig(data);
-      toast.success("SMTP 配置已保存");
-    } catch (e: unknown) {
-      toast.error("保存失败: " + (e instanceof Error ? e.message : "未知错误"));
-    } finally {
-      setSmtpSaving(false);
-    }
-  };
-
-  const handleSmtpTest = async () => {
-    if (!smtpHost || !smtpUsername || !smtpFromEmail || !smtpToEmail) {
-      toast.error("请填写完整的 SMTP 配置");
-      return;
-    }
-    setSmtpTesting(true);
-    try {
-      const result = await testSmtp({
-        host: smtpHost,
-        port: smtpPort,
-        username: smtpUsername,
-        password: smtpPassword,
-        from_email: smtpFromEmail,
-        from_name: smtpFromName,
-        to_email: smtpToEmail,
-        use_tls: smtpUseTls,
-      });
-      toast.success(result.message || "测试邮件已发送");
-    } catch (e: unknown) {
-      toast.error("发送失败: " + (e instanceof Error ? e.message : "未知错误"));
-    } finally {
-      setSmtpTesting(false);
-    }
-  };
 
   const handleTest = async () => {
     setTesting(true);
@@ -447,114 +368,6 @@ export function SettingsPage() {
           <p className="text-xs text-muted-foreground">
             开启后，非目标货币的金额后会显示 ≈ {getSymbol(targetCurrency)}xxx 的换算结果
           </p>
-        </div>
-
-        {/* SMTP 邮件通知 */}
-        <div className="space-y-4 p-4 rounded-xl border bg-card">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Mail className="h-4 w-4 text-muted-foreground" />
-            邮件通知 (SMTP)
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-sm">启用邮件通知</Label>
-            <Switch checked={smtpEnabled} onCheckedChange={setSmtpEnabled} />
-          </div>
-
-          {smtpEnabled && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">SMTP 服务器</Label>
-                  <Input
-                    value={smtpHost}
-                    onChange={(e) => setSmtpHost(e.target.value)}
-                    placeholder="smtp.example.com"
-                    className="text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">端口</Label>
-                  <Input
-                    type="number"
-                    value={smtpPort}
-                    onChange={(e) => setSmtpPort(Number(e.target.value))}
-                    placeholder="587"
-                    className="text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">用户名</Label>
-                  <Input
-                    value={smtpUsername}
-                    onChange={(e) => setSmtpUsername(e.target.value)}
-                    placeholder="user@example.com"
-                    className="text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">密码</Label>
-                  <Input
-                    type="password"
-                    value={smtpPassword}
-                    onChange={(e) => setSmtpPassword(e.target.value)}
-                    placeholder="留空则不修改"
-                    className="text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">发件人邮箱</Label>
-                  <Input
-                    value={smtpFromEmail}
-                    onChange={(e) => setSmtpFromEmail(e.target.value)}
-                    placeholder="noreply@example.com"
-                    className="text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">发件人名称</Label>
-                  <Input
-                    value={smtpFromName}
-                    onChange={(e) => setSmtpFromName(e.target.value)}
-                    placeholder="Sub Recorder"
-                    className="text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs">收件人邮箱</Label>
-                <Input
-                  value={smtpToEmail}
-                  onChange={(e) => setSmtpToEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="text-sm"
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">使用 TLS</Label>
-                <Switch checked={smtpUseTls} onCheckedChange={setSmtpUseTls} />
-              </div>
-
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleSmtpSave} disabled={smtpSaving}>
-                  <Check className="h-3.5 w-3.5 mr-1" />
-                  {smtpSaving ? "保存中..." : "保存配置"}
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleSmtpTest} disabled={smtpTesting}>
-                  <Mail className="h-3.5 w-3.5 mr-1" />
-                  {smtpTesting ? "发送中..." : "发送测试"}
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* 账户设置 */}

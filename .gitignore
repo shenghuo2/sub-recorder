@@ -1,0 +1,28 @@
+# Rust
+backend/target
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Node
+frontend/node_modules
+frontend/.next
+
+# Build cache
+.vite/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+example-part1.json
+example-full.json

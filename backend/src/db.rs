@@ -94,6 +94,16 @@ pub fn init_db(conn: &Connection) {
         );
 
         INSERT OR IGNORE INTO smtp_config (id) VALUES (1);
+
+        CREATE TABLE IF NOT EXISTS notification_channels (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            channel_type TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            config TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
     ").expect("Failed to initialize database");
 
     // Migration: add should_be_tinted column if not exists
@@ -1127,81 +1137,68 @@ pub fn update_user(conn: &Connection, username: Option<&str>, password: Option<&
     Ok(true)
 }
 
-// ========== SMTP 配置 ==========
+// ========== 通知渠道 ==========
 
-pub fn get_smtp_config(conn: &Connection) -> Option<SmtpConfig> {
-    conn.query_row(
-        "SELECT id, enabled, host, port, username, password, from_email, from_name, to_email, use_tls, created_at, updated_at FROM smtp_config WHERE id = 1",
-        [],
-        |row| {
-            Ok(SmtpConfig {
-                id: row.get(0)?,
-                enabled: row.get::<_, i32>(1)? != 0,
-                host: row.get(2)?,
-                port: row.get(3)?,
-                username: row.get(4)?,
-                password: row.get(5)?,
-                from_email: row.get(6)?,
-                from_name: row.get(7)?,
-                to_email: row.get(8)?,
-                use_tls: row.get::<_, i32>(9)? != 0,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-            })
-        },
-    ).ok()
+fn row_to_channel(row: &rusqlite::Row) -> rusqlite::Result<NotificationChannel> {
+    let config_str: String = row.get(4)?;
+    let config: serde_json::Value = serde_json::from_str(&config_str).unwrap_or(serde_json::json!({}));
+    Ok(NotificationChannel {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        channel_type: row.get(2)?,
+        enabled: row.get::<_, i32>(3)? != 0,
+        config,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
 }
 
-pub fn update_smtp_config(conn: &Connection, cfg: &UpdateSmtpConfig) -> rusqlite::Result<()> {
-    let mut updates = Vec::new();
-    let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    
-    if let Some(enabled) = cfg.enabled {
-        updates.push("enabled = ?");
-        values.push(Box::new(if enabled { 1 } else { 0 }));
-    }
-    if let Some(ref host) = cfg.host {
-        updates.push("host = ?");
-        values.push(Box::new(host.clone()));
-    }
-    if let Some(port) = cfg.port {
-        updates.push("port = ?");
-        values.push(Box::new(port));
-    }
-    if let Some(ref username) = cfg.username {
-        updates.push("username = ?");
-        values.push(Box::new(username.clone()));
-    }
-    if let Some(ref password) = cfg.password {
-        updates.push("password = ?");
-        values.push(Box::new(password.clone()));
-    }
-    if let Some(ref from_email) = cfg.from_email {
-        updates.push("from_email = ?");
-        values.push(Box::new(from_email.clone()));
-    }
-    if let Some(ref from_name) = cfg.from_name {
-        updates.push("from_name = ?");
-        values.push(Box::new(from_name.clone()));
-    }
-    if let Some(ref to_email) = cfg.to_email {
-        updates.push("to_email = ?");
-        values.push(Box::new(to_email.clone()));
-    }
-    if let Some(use_tls) = cfg.use_tls {
-        updates.push("use_tls = ?");
-        values.push(Box::new(if use_tls { 1 } else { 0 }));
-    }
-    
-    if updates.is_empty() {
-        return Ok(());
-    }
-    
-    updates.push("updated_at = datetime('now')");
-    let sql = format!("UPDATE smtp_config SET {} WHERE id = 1", updates.join(", "));
-    
-    let params: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
-    conn.execute(&sql, params.as_slice())?;
+pub fn list_notification_channels(conn: &Connection) -> rusqlite::Result<Vec<NotificationChannel>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, channel_type, enabled, config, created_at, updated_at
+         FROM notification_channels ORDER BY created_at DESC"
+    )?;
+    let rows = stmt.query_map([], |row| row_to_channel(row))?;
+    rows.collect()
+}
+
+pub fn get_notification_channel(conn: &Connection, id: &str) -> rusqlite::Result<NotificationChannel> {
+    conn.query_row(
+        "SELECT id, name, channel_type, enabled, config, created_at, updated_at
+         FROM notification_channels WHERE id = ?",
+        [id],
+        |row| row_to_channel(row),
+    )
+}
+
+pub fn create_notification_channel(conn: &Connection, ch: &CreateNotificationChannel) -> rusqlite::Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let config_json = serde_json::to_string(&ch.config).unwrap_or_default();
+    conn.execute(
+        "INSERT INTO notification_channels (id, name, channel_type, enabled, config) VALUES (?, ?, ?, ?, ?)",
+        params![id, ch.name, ch.channel_type, if ch.enabled { 1 } else { 0 }, config_json],
+    )?;
+    Ok(id)
+}
+
+pub fn update_notification_channel(conn: &Connection, id: &str, upd: &UpdateNotificationChannel) -> rusqlite::Result<()> {
+    // 先读取当前值，再合并更新，一条 SQL 搞定
+    let current = get_notification_channel(conn, id)?;
+    let name = upd.name.as_deref().unwrap_or(&current.name);
+    let enabled: i32 = if upd.enabled.unwrap_or(current.enabled) { 1 } else { 0 };
+    let config_json = match &upd.config {
+        Some(c) => serde_json::to_string(c).unwrap_or_default(),
+        None => serde_json::to_string(&current.config).unwrap_or_default(),
+    };
+    conn.execute(
+        "UPDATE notification_channels SET name=?, enabled=?, config=?, updated_at=datetime('now') WHERE id=?",
+        params![name, enabled, config_json, id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_notification_channel(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM notification_channels WHERE id = ?", [id])?;
     Ok(())
 }
 

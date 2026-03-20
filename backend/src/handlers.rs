@@ -702,85 +702,159 @@ pub async fn update_user(
     }
 }
 
-// ========== SMTP 配置 ==========
+// ========== 通知渠道 ==========
 
-pub async fn get_smtp_config(state: web::Data<AppState>) -> HttpResponse {
+pub async fn list_notification_channels(state: web::Data<AppState>) -> HttpResponse {
     let conn = state.db.lock().unwrap();
-    match db::get_smtp_config(&conn) {
-        Some(mut cfg) => {
-            // 隐藏密码，只返回是否已设置
-            cfg.password = if cfg.password.is_empty() { "".to_string() } else { "********".to_string() };
-            HttpResponse::Ok().json(ApiResponse::ok(cfg))
-        }
-        None => HttpResponse::InternalServerError().json(ApiResponse::<()>::err("获取配置失败")),
+    match db::list_notification_channels(&conn) {
+        Ok(channels) => HttpResponse::Ok().json(ApiResponse::ok(channels)),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
     }
 }
 
-pub async fn update_smtp_config(
-    state: web::Data<AppState>,
-    body: web::Json<UpdateSmtpConfig>,
-) -> HttpResponse {
+pub async fn get_notification_channel(state: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
     let conn = state.db.lock().unwrap();
-    match db::update_smtp_config(&conn, &body) {
+    match db::get_notification_channel(&conn, &path) {
+        Ok(ch) => HttpResponse::Ok().json(ApiResponse::ok(ch)),
+        Err(_) => HttpResponse::NotFound().json(ApiResponse::<()>::err("渠道不存在".to_string())),
+    }
+}
+
+pub async fn create_notification_channel(state: web::Data<AppState>, body: web::Json<CreateNotificationChannel>) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::create_notification_channel(&conn, &body) {
+        Ok(id) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"id": id}))),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+pub async fn update_notification_channel(state: web::Data<AppState>, path: web::Path<String>, body: web::Json<UpdateNotificationChannel>) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::update_notification_channel(&conn, &path, &body) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true}))),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
     }
 }
 
-pub async fn test_smtp(body: web::Json<TestSmtpRequest>) -> HttpResponse {
+pub async fn delete_notification_channel(state: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::delete_notification_channel(&conn, &path) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true}))),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
+pub async fn test_notification(body: web::Json<TestNotificationRequest>) -> HttpResponse {
+    match body.channel_type.as_str() {
+        "smtp" => do_test_smtp(&body.config).await,
+        "webhook" => do_test_webhook(&body.config).await,
+        _ => HttpResponse::BadRequest().json(ApiResponse::<()>::err("不支持的通知类型".to_string())),
+    }
+}
+
+async fn do_test_smtp(config: &serde_json::Value) -> HttpResponse {
     use mail_send::{SmtpClientBuilder, mail_builder::MessageBuilder};
-    
+
+    let cfg: SmtpChannelConfig = match serde_json::from_value(config.clone()) {
+        Ok(c) => c,
+        Err(e) => return HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("配置解析失败: {}", e))),
+    };
+
+    log::info!("Testing SMTP: {}:{} tls={}", cfg.host, cfg.port, cfg.use_tls);
+
     let message = MessageBuilder::new()
-        .from((body.from_name.as_str(), body.from_email.as_str()))
-        .to(body.to_email.as_str())
+        .from((cfg.from_name.as_str(), cfg.from_email.as_str()))
+        .to(cfg.to_email.as_str())
         .subject("Sub Recorder 邮件测试")
         .text_body("这是一封测试邮件，如果您收到此邮件，说明 SMTP 配置正确。");
 
-    let creds = (body.username.clone(), body.password.clone());
-    
-    // 端口 465 使用 implicit TLS (SSL/TLS)，其他端口使用 STARTTLS
-    let use_implicit_tls = body.port == 465;
-    
-    log::info!("Testing SMTP: {}:{} (TLS: {}, Implicit: {})", body.host, body.port, body.use_tls, use_implicit_tls);
-    
-    let result = if body.use_tls {
-        SmtpClientBuilder::new(body.host.clone(), body.port as u16)
+    let creds = (cfg.username.clone(), cfg.password.clone());
+    let use_implicit_tls = cfg.port == 465;
+
+    let conn_result = if cfg.use_tls {
+        SmtpClientBuilder::new(cfg.host.clone(), cfg.port as u16)
             .implicit_tls(use_implicit_tls)
             .credentials(creds)
-            .connect()
-            .await
+            .connect().await
     } else {
-        SmtpClientBuilder::new(body.host.clone(), body.port as u16)
+        SmtpClientBuilder::new(cfg.host.clone(), cfg.port as u16)
             .implicit_tls(false)
             .allow_invalid_certs()
             .credentials(creds)
-            .connect()
-            .await
+            .connect().await
     };
 
-    match result {
-        Ok(mut client) => {
-            log::info!("SMTP connected, sending test email");
-            match client.send(message).await {
-                Ok(_) => {
-                    log::info!("Test email sent successfully");
-                    HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试邮件已发送"})))
-                }
-                Err(e) => {
-                    log::error!("Failed to send email: {}", e);
-                    let err_msg = format!("发送失败: {}。提示：请检查发件人邮箱、收件人邮箱是否正确，以及 SMTP 服务器是否支持当前配置", e);
-                    HttpResponse::BadRequest().json(ApiResponse::<()>::err(err_msg))
-                }
+    match conn_result {
+        Ok(mut client) => match client.send(message).await {
+            Ok(_) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试邮件已发送"}))),
+            Err(e) => {
+                log::error!("SMTP send failed: {}", e);
+                HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("发送失败: {}", e)))
+            }
+        },
+        Err(e) => {
+            log::error!("SMTP connect failed: {}", e);
+            let msg = if e.to_string().contains("Unparseable") {
+                "连接失败: 响应格式异常，请检查端口（25/465/587）和 TLS 设置".to_string()
+            } else {
+                format!("连接失败: {}", e)
+            };
+            HttpResponse::BadRequest().json(ApiResponse::<()>::err(msg))
+        }
+    }
+}
+
+async fn do_test_webhook(config: &serde_json::Value) -> HttpResponse {
+    let cfg: WebhookChannelConfig = match serde_json::from_value(config.clone()) {
+        Ok(c) => c,
+        Err(e) => return HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("配置解析失败: {}", e))),
+    };
+
+    log::info!("Testing webhook: {} type={}", cfg.url, cfg.webhook_type);
+
+    let client = reqwest::Client::new();
+    let mut req = match cfg.method.to_uppercase().as_str() {
+        "GET" => client.get(&cfg.url),
+        _ => client.post(&cfg.url),
+    };
+
+    if let Some(headers) = &cfg.headers {
+        if let Some(obj) = headers.as_object() {
+            for (k, v) in obj {
+                if let Some(s) = v.as_str() { req = req.header(k, s); }
+            }
+        }
+    }
+
+    let body = match cfg.webhook_type.as_str() {
+        "onebot" => serde_json::json!({"message": "Sub Recorder 测试消息\n如果您收到此消息，说明配置正确。"}),
+        _ => {
+            let text = cfg.body_template
+                .replace("{title}", "Sub Recorder 测试")
+                .replace("{message}", "如果您收到此消息，说明配置正确。")
+                .replace("{subscription}", "测试订阅");
+            serde_json::from_str(&text).unwrap_or(serde_json::json!({"text": text}))
+        }
+    };
+
+    if cfg.method.to_uppercase() != "GET" {
+        req = req.json(&body);
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试消息已发送"})))
+            } else {
+                let body_text = resp.text().await.unwrap_or_default();
+                log::error!("Webhook error: {} {}", status, body_text);
+                HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("Webhook 返回 {}: {}", status, body_text)))
             }
         }
         Err(e) => {
-            log::error!("Failed to connect to SMTP server: {}", e);
-            let err_msg = if e.to_string().contains("Unparseable") {
-                format!("连接失败: SMTP 服务器响应格式异常。建议：1) 检查端口是否正确（常用：25/465/587）；2) 尝试切换 TLS 设置；3) 确认 SMTP 服务器地址正确")
-            } else {
-                format!("连接失败: {}。请检查服务器地址、端口、用户名和密码", e)
-            };
-            HttpResponse::BadRequest().json(ApiResponse::<()>::err(err_msg))
+            log::error!("Webhook failed: {}", e);
+            HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("发送失败: {}", e)))
         }
     }
 }
