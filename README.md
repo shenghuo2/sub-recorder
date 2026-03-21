@@ -25,9 +25,25 @@
 - **用户认证** — 登录鉴权、密码重置，亦可禁用鉴权
 - **轻量部署** — 单进程单端口，Alpine + Rust 二进制 + 静态前端，镜像极小
 
-## 快速开始
+## 部署
 
-### Docker Compose（推荐）
+### 快速部署
+
+#### Render
+
+点击下方按钮，使用 [Render](https://render.com/) 一键部署：
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/shenghuo2/sub-recorder)
+
+> **注意**：Render 免费套餐在无请求时会自动休眠。
+>
+> *Free instances spin down after periods of inactivity. They do not support SSH access, scaling, one-off jobs, or persistent disks. Select any paid instance type to enable these features.*
+
+### Docker
+
+镜像名 `shenghuo2/sub-recorder:latest`
+
+#### Docker Compose（推荐）
 
 ```yaml
 # docker-compose.yml
@@ -54,7 +70,7 @@ docker compose up -d
 docker logs sub-recorder 2>&1 | grep "密码:"
 ```
 
-### Docker Run
+#### Docker Run
 
 ```bash
 mkdir -p ./data
@@ -68,7 +84,7 @@ docker run -d \
   shenghuo2/sub-recorder:latest
 ```
 
-### 从源码构建
+#### 从源码构建
 
 ```bash
 git clone https://github.com/shenghuo2/sub-recorder.git

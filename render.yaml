@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: sub-recorder
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: DATABASE_PATH
+        value: /app/data/subscriptions.db
+      - key: PORT
+        value: "3000"
