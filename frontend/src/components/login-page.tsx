@@ -109,7 +109,7 @@ export function LoginPage({ onLoginSuccess, authInfo }: LoginPageProps) {
       </Card>
       {authInfo?.demo_mode && (
         <p className="absolute bottom-4 text-xs text-muted-foreground">
-          © 2025{" "}
+          © {new Date().getFullYear()}{" "}
           <a href="https://github.com/shenghuo2" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">shenghuo2</a>
           {" · "}
           <a href="https://github.com/shenghuo2/sub-recorder" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">sub-recorder</a>

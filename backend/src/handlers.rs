@@ -691,6 +691,14 @@ pub async fn update_user(
     body: web::Json<UpdateUserRequest>,
 ) -> HttpResponse {
     let conn = state.db.lock().unwrap();
+
+    // demo 模式下禁止修改用户名和密码
+    let demo_mode = std::env::var("DEMO_MODE")
+        .map(|v| v.to_lowercase() == "true" || v == "1")
+        .unwrap_or(false);
+    if demo_mode && (body.new_password.is_some() || body.username.is_some()) {
+        return HttpResponse::Forbidden().json(ApiResponse::<()>::err("演示模式下不允许修改用户名和密码"));
+    }
     
     // 如果要修改密码，需要验证旧密码
     if body.new_password.is_some() {

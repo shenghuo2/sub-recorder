@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig, fetchExchangeRates, getCurrentExchangeRates, clearExchangeRatesCache } from "@/lib/currency";
-import { clearAuthToken, getAuthToken, getStoredUsername, updateUser } from "@/lib/api";
+import { clearAuthToken, getAuthToken, getStoredUsername, updateUser, checkAuth } from "@/lib/api";
 
 const API_URL_KEY = "sub_recorder_api_url";
 
@@ -85,6 +85,7 @@ export function SettingsPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingUser, setSavingUser] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
 
   const loadExchangeRateInfo = () => {
@@ -120,6 +121,10 @@ export function SettingsPage() {
       setUsername(storedUsername);
       setNewUsername(storedUsername);
     }
+    // 检测 demo 模式
+    checkAuth().then((info) => {
+      if (info.demo_mode) setDemoMode(true);
+    }).catch(() => {});
   }, []);
 
   const handleSave = () => {
@@ -374,6 +379,9 @@ export function SettingsPage() {
         {getAuthToken() && (
           <div className="border-t pt-4 space-y-4">
             <h3 className="font-medium text-sm">账户设置</h3>
+            {demoMode && (
+              <p className="text-xs text-muted-foreground">演示模式下不允许修改用户名和密码</p>
+            )}
             
             {/* 用户名 */}
             <div className="space-y-2">
@@ -383,10 +391,11 @@ export function SettingsPage() {
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
                   placeholder="用户名"
+                  disabled={demoMode}
                 />
                 <Button
                   size="sm"
-                  disabled={savingUser || newUsername === username || !newUsername.trim()}
+                  disabled={demoMode || savingUser || newUsername === username || !newUsername.trim()}
                   onClick={async () => {
                     setSavingUser(true);
                     try {
@@ -413,23 +422,26 @@ export function SettingsPage() {
                 value={oldPassword}
                 onChange={(e) => setOldPassword(e.target.value)}
                 placeholder="当前密码"
+                disabled={demoMode}
               />
               <Input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="新密码"
+                disabled={demoMode}
               />
               <Input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="确认新密码"
+                disabled={demoMode}
               />
               <Button
                 size="sm"
                 className="w-full"
-                disabled={savingUser || !oldPassword || !newPassword || newPassword !== confirmPassword}
+                disabled={demoMode || savingUser || !oldPassword || !newPassword || newPassword !== confirmPassword}
                 onClick={async () => {
                   if (newPassword !== confirmPassword) {
                     toast.error("两次输入的密码不一致");
@@ -476,7 +488,7 @@ export function SettingsPage() {
               <span className="font-medium text-foreground">Sub Recorder</span> — 个人订阅管理工具
             </p>
             <p>
-              © 2025{" "}
+              © {new Date().getFullYear()}{" "}
               <a href="https://github.com/shenghuo2" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">shenghuo2</a>
               {" · "}
               <a href="https://github.com/shenghuo2/sub-recorder" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">GitHub</a>
