@@ -1073,7 +1073,12 @@ pub fn init_default_user(conn: &Connection) -> Option<String> {
 
     if count == 0 {
         let username = std::env::var("INIT_USERNAME").unwrap_or_else(|_| "admin".to_string());
-        let password = std::env::var("INIT_PASSWORD").unwrap_or_else(|_| generate_random_password());
+        let demo_mode = std::env::var("DEMO_MODE")
+            .map(|v| v.to_lowercase() == "true" || v == "1")
+            .unwrap_or(false);
+        let password = std::env::var("INIT_PASSWORD").unwrap_or_else(|_| {
+            if demo_mode { "demo".to_string() } else { generate_random_password() }
+        });
         let password_hash = hash_password(&password);
         let _ = conn.execute(
             "INSERT INTO users (id, username, password_hash) VALUES (1, ?1, ?2)",

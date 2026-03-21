@@ -1,9 +1,11 @@
-use actix_web::{dev::ServiceRequest, Error, HttpResponse};
+use actix_web::{dev::ServiceRequest, Error, HttpResponse, web};
 use actix_web::body::EitherBody;
 use actix_web::dev::{Service, ServiceResponse, Transform};
 use std::future::{Ready, ready, Future};
 use std::pin::Pin;
 use std::sync::Arc;
+
+use crate::db::AppState;
 
 /// 检查是否禁用鉴权（通过环境变量 DISABLE_AUTH=true）
 pub fn is_auth_disabled() -> bool {
@@ -94,14 +96,21 @@ where
 
             // 检查 Authorization header
             let auth_header = req.headers().get("Authorization");
-            let is_valid = if let Some(header_value) = auth_header {
-                if let Ok(header_str) = header_value.to_str() {
-                    if let Some(token) = header_str.strip_prefix("Bearer ") {
-                        // Token 就是密码的哈希值，直接比较
-                        !token.is_empty() && token.len() == 64
-                    } else {
-                        false
-                    }
+            let token = auth_header
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.strip_prefix("Bearer "))
+                .unwrap_or("");
+
+            // Token 就是密码的哈希值，需要与数据库中的实际哈希比对
+            let is_valid = if !token.is_empty() && token.len() == 64 {
+                if let Some(state) = req.app_data::<web::Data<AppState>>() {
+                    let conn = state.db.lock().unwrap();
+                    let stored_hash: Option<String> = conn.query_row(
+                        "SELECT password_hash FROM users WHERE id = 1",
+                        [],
+                        |row| row.get(0),
+                    ).ok();
+                    stored_hash.as_deref() == Some(token)
                 } else {
                     false
                 }
