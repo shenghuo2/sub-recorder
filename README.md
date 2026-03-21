@@ -10,6 +10,8 @@
 
 > 多币种 · 自动汇率 · 账单周期 · 场景分组 · 分类筛选 · 多渠道通知
 
+👉 **在线演示**：<https://sub-recorder.onrender.com/>
+
 <!-- 在此放置截图
 ![screenshot](docs/screenshot.png)
 -->
@@ -35,7 +37,7 @@
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/shenghuo2/sub-recorder)
 
-> **注意**：Render 免费套餐在无请求时会自动休眠。
+> **注意**：Render 免费计划无持久化存储，每次重启容器数据就会丢失。免费实例在无请求时会自动休眠。
 >
 > *Free instances spin down after periods of inactivity. They do not support SSH access, scaling, one-off jobs, or persistent disks. Select any paid instance type to enable these features.*
 
