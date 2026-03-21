@@ -1,8 +1,9 @@
 services:
   - type: web
     name: sub-recorder
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    runtime: image
+    image:
+      url: docker.io/shenghuo2/sub-recorder:latest
     plan: free
     envVars:
       - key: DATABASE_PATH
