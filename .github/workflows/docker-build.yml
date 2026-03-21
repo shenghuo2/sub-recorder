@@ -21,13 +21,11 @@ on:
 env:
   DOCKERHUB_USERNAME: shenghuo2
   IMAGE_NAME: sub-recorder
+  REGISTRY_IMAGE: shenghuo2/sub-recorder
 
 jobs:
-  build-and-push:
+  build-amd64:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,10 +36,6 @@ jobs:
             echo "❌ 版本号格式错误，应为 vX.Y.Z (例如: v3.2.2)"
             exit 1
           fi
-          echo "✅ 版本号格式正确: ${{ inputs.version }}"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -52,25 +46,117 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ inputs.version }}
-            type=raw,value=latest,enable=${{ inputs.push_latest }}
-
-      - name: Build and push Docker image
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,scope=amd64,mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-amd64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ 版本号格式错误，应为 vX.Y.Z (例如: v3.2.2)"
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=arm64
+          cache-to: type=gha,scope=arm64,mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-arm64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-and-release:
+    runs-on: ubuntu-latest
+    needs: [build-amd64, build-arm64]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          TAGS="-t ${{ env.REGISTRY_IMAGE }}:${{ inputs.version }}"
+          if [ "${{ inputs.push_latest }}" = "true" ]; then
+            TAGS="$TAGS -t ${{ env.REGISTRY_IMAGE }}:latest"
+          fi
+          docker buildx imagetools create $TAGS \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ inputs.version }}
 
       - name: Create Git tag
         if: inputs.create_release
@@ -84,34 +170,35 @@ jobs:
         if: inputs.create_release
         id: notes
         run: |
-          # 获取上一个 tag
-          PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | head -2 | tail -1)
           CURRENT_TAG="${{ inputs.version }}"
+          # 排除当前 tag，取上一个版本 tag
+          PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | grep -v "^${CURRENT_TAG}$" | head -1)
 
           echo "Previous tag: $PREV_TAG"
           echo "Current tag: $CURRENT_TAG"
 
-          # 生成 changelog
           {
             echo "body<<RELEASE_EOF"
 
             echo "## Docker 镜像"
             echo ""
+            echo "支持 \`linux/amd64\` 和 \`linux/arm64\` 架构。"
+            echo ""
             echo '```bash'
-            echo "docker pull ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${CURRENT_TAG}"
+            echo "docker pull ${{ env.REGISTRY_IMAGE }}:${CURRENT_TAG}"
             echo '```'
             echo ""
             echo "| 标签 | 链接 |"
             echo "|------|------|"
-            echo "| \`${CURRENT_TAG}\` | [Docker Hub](https://hub.docker.com/r/${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}/tags?name=${CURRENT_TAG}) |"
+            echo "| \`${CURRENT_TAG}\` | [Docker Hub](https://hub.docker.com/r/${{ env.REGISTRY_IMAGE }}/tags?name=${CURRENT_TAG}) |"
             if [ "${{ inputs.push_latest }}" = "true" ]; then
-              echo "| \`latest\` | [Docker Hub](https://hub.docker.com/r/${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}/tags?name=latest) |"
+              echo "| \`latest\` | [Docker Hub](https://hub.docker.com/r/${{ env.REGISTRY_IMAGE }}/tags?name=latest) |"
             fi
             echo ""
 
             echo "## 更新内容"
             echo ""
-            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$CURRENT_TAG" ]; then
+            if [ -n "$PREV_TAG" ]; then
               git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges
             else
               git log --pretty=format:"- %s (%h)" --no-merges -20
@@ -119,7 +206,7 @@ jobs:
             echo ""
             echo ""
 
-            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$CURRENT_TAG" ]; then
+            if [ -n "$PREV_TAG" ]; then
               echo "**完整变更**: [\`${PREV_TAG}...${CURRENT_TAG}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${CURRENT_TAG})"
             fi
 
