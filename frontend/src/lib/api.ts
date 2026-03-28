@@ -123,6 +123,15 @@ export async function login(password: string): Promise<LoginResponse> {
   return json.data as LoginResponse;
 }
 
+export async function logout(): Promise<void> {
+  try {
+    await request<unknown>("/api/auth/logout", { method: "POST" });
+  } catch {
+    // 即使后端请求失败，也继续清除本地状态
+  }
+  clearAuthToken();
+}
+
 export async function getUserInfo(): Promise<UserInfo> {
   return request<UserInfo>("/api/auth/user");
 }

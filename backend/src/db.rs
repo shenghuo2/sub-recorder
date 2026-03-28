@@ -1,6 +1,7 @@
 use rusqlite::{Connection, params};
 use std::sync::Mutex;
 use chrono::NaiveDate;
+use rand::RngCore;
 
 use crate::models::*;
 
@@ -66,6 +67,15 @@ pub fn init_db(conn: &Connection) {
             password_hash TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
         CREATE TABLE IF NOT EXISTS scenes (
             id TEXT PRIMARY KEY,
@@ -1035,12 +1045,22 @@ pub fn delete_scene(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
 
 // ========== 用户/鉴权 ==========
 
-use sha2::{Sha256, Digest};
-
+/// Hash password using bcrypt (cost=10)
 pub fn hash_password(password: &str) -> String {
+    bcrypt::hash(password, 10).expect("bcrypt hash failed")
+}
+
+/// Legacy SHA-256 hash for migration compatibility
+fn hash_password_sha256(password: &str) -> String {
+    use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+/// Check if a hash is a legacy SHA-256 hex string (64 hex chars)
+fn is_sha256_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 pub fn generate_random_password() -> String {
@@ -1109,13 +1129,81 @@ pub fn get_user(conn: &Connection) -> rusqlite::Result<Option<User>> {
     }
 }
 
+/// Verify password, supporting both bcrypt and legacy SHA-256.
+/// If a legacy SHA-256 hash matches, it is automatically upgraded to bcrypt.
 pub fn verify_password(conn: &Connection, password: &str) -> bool {
     if let Ok(Some(user)) = get_user(conn) {
-        let input_hash = hash_password(password);
-        user.password_hash == input_hash
+        // Try bcrypt first
+        if bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
+            return true;
+        }
+        // Fallback: legacy SHA-256 migration
+        if is_sha256_hash(&user.password_hash) {
+            let sha256_hash = hash_password_sha256(password);
+            if user.password_hash == sha256_hash {
+                // Upgrade to bcrypt
+                let bcrypt_hash = hash_password(password);
+                let _ = conn.execute(
+                    "UPDATE users SET password_hash = ?1 WHERE id = 1",
+                    params![bcrypt_hash],
+                );
+                log::info!("已将密码哈希从 SHA-256 升级为 bcrypt");
+                return true;
+            }
+        }
+        false
     } else {
         false
     }
+}
+
+// ========== Session 管理 ==========
+
+/// Generate a cryptographically random session token (64 hex chars)
+pub fn generate_session_token() -> String {
+    let mut rng = rand::thread_rng();
+    let mut bytes = [0u8; 32];
+    rng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+/// Create a new session, returns the token. Default expiry: 30 days.
+pub fn create_session(conn: &Connection, user_id: i64) -> rusqlite::Result<String> {
+    // Clean up expired sessions first
+    cleanup_expired_sessions(conn)?;
+    let token = generate_session_token();
+    conn.execute(
+        "INSERT INTO sessions (token, user_id, expires_at) VALUES (?1, ?2, datetime('now', '+30 days'))",
+        params![token, user_id],
+    )?;
+    Ok(token)
+}
+
+/// Validate a session token. Returns user_id if valid and not expired.
+pub fn validate_session(conn: &Connection, token: &str) -> Option<i64> {
+    conn.query_row(
+        "SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')",
+        params![token],
+        |row| row.get(0),
+    ).ok()
+}
+
+/// Delete a specific session (logout)
+pub fn delete_session(conn: &Connection, token: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM sessions WHERE token = ?1", params![token])?;
+    Ok(())
+}
+
+/// Delete all sessions for a user (e.g. after password change)
+pub fn delete_user_sessions(conn: &Connection, user_id: i64) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])?;
+    Ok(())
+}
+
+/// Remove expired sessions
+pub fn cleanup_expired_sessions(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM sessions WHERE expires_at <= datetime('now')", [])?;
+    Ok(())
 }
 
 pub fn update_user(conn: &Connection, username: Option<&str>, password: Option<&str>) -> rusqlite::Result<bool> {

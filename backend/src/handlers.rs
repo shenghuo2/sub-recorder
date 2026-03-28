@@ -628,16 +628,42 @@ pub async fn login(
         // 获取用户信息
         let user = db::get_user(&conn).ok().flatten();
         let username = user.as_ref().map(|u| u.username.clone()).unwrap_or_else(|| "admin".to_string());
-        let token = user.map(|u| u.password_hash).unwrap_or_default();
+        let user_id = user.as_ref().map(|u| u._id).unwrap_or(1);
         
-        HttpResponse::Ok().json(ApiResponse::ok(LoginResponse {
-            token,
-            username,
-            require_auth: true,
-        }))
+        // 创建 session token
+        match db::create_session(&conn, user_id) {
+            Ok(token) => {
+                HttpResponse::Ok().json(ApiResponse::ok(LoginResponse {
+                    token,
+                    username,
+                    require_auth: true,
+                }))
+            }
+            Err(e) => {
+                HttpResponse::InternalServerError().json(ApiResponse::<()>::err(format!("创建会话失败: {}", e)))
+            }
+        }
     } else {
         HttpResponse::Unauthorized().json(ApiResponse::<()>::err("密码错误"))
     }
+}
+
+pub async fn logout(
+    state: web::Data<AppState>,
+    req: actix_web::HttpRequest,
+) -> HttpResponse {
+    // 从 Authorization header 提取 token
+    let token = req.headers().get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .unwrap_or("");
+    
+    if !token.is_empty() {
+        let conn = state.db.lock().unwrap();
+        let _ = db::delete_session(&conn, token);
+    }
+    
+    HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true})))
 }
 
 pub async fn check_auth() -> HttpResponse {
@@ -708,14 +734,28 @@ pub async fn update_user(
         }
     }
     
+    let password_changed = body.new_password.is_some();
+    
     match db::update_user(&conn, body.username.as_deref(), body.new_password.as_deref()) {
         Ok(_) => {
-            // 返回新的用户信息和 token
             if let Ok(Some(user)) = db::get_user(&conn) {
-                HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({
-                    "username": user.username,
-                    "token": user.password_hash,
-                })))
+                if password_changed {
+                    // 密码已更改，撤销所有旧 session，创建新 session
+                    let _ = db::delete_user_sessions(&conn, user._id);
+                    match db::create_session(&conn, user._id) {
+                        Ok(token) => {
+                            HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({
+                                "username": user.username,
+                                "token": token,
+                            })))
+                        }
+                        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+                    }
+                } else {
+                    HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({
+                        "username": user.username,
+                    })))
+                }
             } else {
                 HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true})))
             }

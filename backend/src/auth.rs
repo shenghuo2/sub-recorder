@@ -88,29 +88,29 @@ where
                 return Ok(res.map_into_left_body());
             }
 
-            // 登录和检查接口不需要鉴权
-            if path == "/api/auth/login" || path == "/api/auth/check" || path == "/api/auth/user" {
+            // 登录、鉴权检查接口不需要鉴权
+            if path == "/api/auth/login" || path == "/api/auth/check" {
                 let res = service.call(req).await?;
                 return Ok(res.map_into_left_body());
             }
 
-            // 检查 Authorization header
+            // /api/auth/user GET（获取用户信息）不需要鉴权，但 PUT（修改用户）需要
+            if path == "/api/auth/user" && req.method() == actix_web::http::Method::GET {
+                let res = service.call(req).await?;
+                return Ok(res.map_into_left_body());
+            }
+
+            // 检查 Authorization header，验证 session token
             let auth_header = req.headers().get("Authorization");
             let token = auth_header
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("Bearer "))
                 .unwrap_or("");
 
-            // Token 就是密码的哈希值，需要与数据库中的实际哈希比对
-            let is_valid = if !token.is_empty() && token.len() == 64 {
+            let is_valid = if !token.is_empty() {
                 if let Some(state) = req.app_data::<web::Data<AppState>>() {
                     let conn = state.db.lock().unwrap();
-                    let stored_hash: Option<String> = conn.query_row(
-                        "SELECT password_hash FROM users WHERE id = 1",
-                        [],
-                        |row| row.get(0),
-                    ).ok();
-                    stored_hash.as_deref() == Some(token)
+                    crate::db::validate_session(&conn, token).is_some()
                 } else {
                     false
                 }

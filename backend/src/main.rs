@@ -34,6 +34,7 @@ async fn main() -> std::io::Result<()> {
         db::init_db(&conn);
         let new_password = db::generate_random_password();
         db::update_user(&conn, None, Some(&new_password)).expect("Failed to reset password");
+        db::delete_user_sessions(&conn, 1).ok(); // 撤销所有旧 session
         println!("========================================");
         println!("密码已重置");
         println!("用户名: admin");
@@ -101,6 +102,7 @@ async fn main() -> std::io::Result<()> {
             .route("/api/import", web::post().to(handlers::import_data))
             // 鉴权
             .route("/api/auth/login", web::post().to(handlers::login))
+            .route("/api/auth/logout", web::post().to(handlers::logout))
             .route("/api/auth/check", web::get().to(handlers::check_auth))
             .route("/api/auth/user", web::get().to(handlers::get_user_info))
             .route("/api/auth/user", web::put().to(handlers::update_user))

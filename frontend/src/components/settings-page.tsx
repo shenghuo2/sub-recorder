@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig, fetchExchangeRates, getCurrentExchangeRates, clearExchangeRatesCache } from "@/lib/currency";
-import { clearAuthToken, getAuthToken, getStoredUsername, updateUser, checkAuth } from "@/lib/api";
+import { clearAuthToken, getAuthToken, getStoredUsername, updateUser, checkAuth, logout } from "@/lib/api";
 
 const API_URL_KEY = "sub_recorder_api_url";
 
@@ -469,8 +469,8 @@ export function SettingsPage() {
             <Button
               variant="outline"
               className="w-full text-destructive hover:text-destructive"
-              onClick={() => {
-                clearAuthToken();
+              onClick={async () => {
+                await logout();
                 toast.success("已登出");
                 window.location.reload();
               }}
