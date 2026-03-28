@@ -115,12 +115,19 @@ async fn main() -> std::io::Result<()> {
             .route("/api/notifications/channels/{id}", web::put().to(handlers::update_notification_channel))
             .route("/api/notifications/channels/{id}", web::delete().to(handlers::delete_notification_channel))
             .route("/api/notifications/test", web::post().to(handlers::test_notification))
-            // 静态文件 + SPA fallback
-            .service(
-                actix_files::Files::new("/", static_dir())
-                    .index_file("index.html")
-                    .default_handler(web::to(spa_fallback))
-            )
+            // 静态文件 + SPA fallback（目录存在时才注册）
+            .configure(|cfg| {
+                let dir = static_dir();
+                if std::path::Path::new(&dir).is_dir() {
+                    cfg.service(
+                        actix_files::Files::new("/", &dir)
+                            .index_file("index.html")
+                            .default_handler(web::to(spa_fallback))
+                    );
+                } else {
+                    cfg.default_service(web::to(spa_fallback));
+                }
+            })
     })
     .bind(("0.0.0.0", port))?
     .run()
