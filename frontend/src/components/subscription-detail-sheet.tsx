@@ -339,17 +339,20 @@ export function SubscriptionDetailSheet({
                 <div className="mt-4 flex items-baseline gap-1 flex-wrap">
                   {(detail.effective_records ?? []).length > 0 ? (
                     <>
-                      {detail.effective_records.map((r, i) => (
-                        <span key={i} className="text-3xl font-bold">
-                          {i > 0 && <span className="text-lg opacity-50 mx-1">+</span>}
-                          {formatCurrencyCompact(r.amount, r.currency)}
-                          {!detail.is_one_time && (
-                            <span className="text-sm font-medium opacity-70">
-                              {getBillingCycleShort(r.billing_cycle || detail.billing_cycle, getCycleFormat())}
-                            </span>
-                          )}
-                        </span>
-                      ))}
+                      {detail.effective_records.map((r, i) => {
+                        const rCycle = r.billing_cycle || detail.billing_cycle;
+                        return (
+                          <span key={i} className="text-3xl font-bold">
+                            {i > 0 && <span className="text-lg opacity-50 mx-1">+</span>}
+                            {formatCurrencyCompact(r.amount, r.currency)}
+                            {(!detail.is_one_time || rCycle) && (
+                              <span className="text-sm font-medium opacity-70">
+                                {getBillingCycleShort(rCycle, getCycleFormat())}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
                       <span className="text-sm opacity-70 ml-2 line-through">
                         {formatCurrencyCompact(detail.price, detail.currency)}
                       </span>
@@ -438,9 +441,8 @@ export function SubscriptionDetailSheet({
                 {detail.end_date && (
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">结束日期</span>
-                    <span className={`text-sm font-medium ${isExpired ? "text-destructive" : ""}`}>
+                    <span className={`text-sm font-medium ${isExpired ? "text-destructive line-through" : ""}`}>
                       {new Date(detail.end_date).toLocaleDateString("zh-CN")}
-                      {isExpired && " (已过期)"}
                     </span>
                   </div>
                 )}
@@ -481,14 +483,16 @@ export function SubscriptionDetailSheet({
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {detail.billing_records.map((record) => (
+                    {detail.billing_records.map((record) => {
+                      const recordExpired = new Date(record.period_end) < today;
+                      return (
                       <div
                         key={record.id}
-                        className="flex items-center justify-between rounded-lg border p-3"
+                        className={`flex items-center justify-between rounded-lg border p-3 ${recordExpired ? "opacity-60" : ""}`}
                       >
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium">
+                            <span className={`font-medium ${recordExpired ? "text-muted-foreground" : ""}`}>
                               {formatCurrencyCompact(record.amount, record.currency)}
                             </span>
                             <span className="text-xs text-muted-foreground">
@@ -503,7 +507,7 @@ export function SubscriptionDetailSheet({
                           <div className="flex flex-col gap-0.5 mt-1">
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
                               <Calendar className="h-3 w-3" />
-                              {record.period_start} → {record.period_end}
+                              {record.period_start} → <span className={recordExpired ? "text-destructive line-through" : ""}>{record.period_end}</span>
                             </p>
                             {record.converted_amount && record.target_currency && (
                               <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -537,7 +541,8 @@ export function SubscriptionDetailSheet({
                           </Button>
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
               </div>

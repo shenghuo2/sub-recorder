@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig, fetchExchangeRates, getCurrentExchangeRates, clearExchangeRatesCache } from "@/lib/currency";
 import { clearAuthToken, getAuthToken, getStoredUsername, updateUser, checkAuth, logout } from "@/lib/api";
+import { PasswordInput } from "@/components/ui/password-input";
 
 const API_URL_KEY = "sub_recorder_api_url";
 
@@ -417,22 +418,19 @@ export function SettingsPage() {
             {/* 修改密码 */}
             <div className="space-y-2">
               <Label className="text-sm">修改密码</Label>
-              <Input
-                type="password"
+              <PasswordInput
                 value={oldPassword}
                 onChange={(e) => setOldPassword(e.target.value)}
                 placeholder="当前密码"
                 disabled={demoMode}
               />
-              <Input
-                type="password"
+              <PasswordInput
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="新密码"
                 disabled={demoMode}
               />
-              <Input
-                type="password"
+              <PasswordInput
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="确认新密码"

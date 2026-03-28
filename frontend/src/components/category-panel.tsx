@@ -116,10 +116,11 @@ export function CategoryPanel({
   };
 
   const toggleFilter = (id: number) => {
-    const next = new Set(selectedCategoryIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    onFilterChange(next);
+    if (selectedCategoryIds.size === 1 && selectedCategoryIds.has(id)) {
+      onFilterChange(new Set());
+    } else {
+      onFilterChange(new Set([id]));
+    }
   };
 
   const allSelected = selectedCategoryIds.size === 0;

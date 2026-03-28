@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, OptionalExtension};
 use std::sync::Mutex;
 use chrono::NaiveDate;
 use rand::RngCore;
@@ -619,6 +619,10 @@ pub fn create_billing_record(conn: &Connection, sub_id: &str, input: &CreateBill
         ],
     )?;
     let id = conn.last_insert_rowid();
+
+    // 同步订阅状态
+    sync_subscription_from_records(conn, sub_id)?;
+
     get_billing_record(conn, id)
 }
 
@@ -679,11 +683,26 @@ pub fn update_billing_record(conn: &Connection, id: i64, input: &UpdateBillingRe
         ],
     )?;
 
+    // 同步订阅状态
+    sync_subscription_from_records(conn, &existing.subscription_id)?;
+
     get_billing_record(conn, id)
 }
 
 pub fn delete_billing_record(conn: &Connection, id: i64) -> rusqlite::Result<bool> {
+    // 先获取 subscription_id，删除后需要同步
+    let sub_id: Option<String> = conn.query_row(
+        "SELECT subscription_id FROM billing_records WHERE id = ?1",
+        params![id],
+        |row| row.get(0),
+    ).optional()?;
+
     let affected = conn.execute("DELETE FROM billing_records WHERE id = ?1", params![id])?;
+    if affected > 0 {
+        if let Some(sub_id) = sub_id {
+            sync_subscription_from_records(conn, &sub_id)?;
+        }
+    }
     Ok(affected > 0)
 }
 
@@ -1307,4 +1326,69 @@ fn recalc_next_bill_date(billing_date: NaiveDate, cycle: &BillingCycle) -> Naive
         next = cycle.next_date(next);
     }
     next
+}
+
+/// 根据账单记录同步订阅的 end_date、price、currency、billing_cycle、next_bill_date。
+/// 取 period_end 最大的那条账单记录作为「最新账单」，用它来驱动订阅状态。
+/// 如果没有账单记录则不修改订阅（保持手动设置）。
+pub fn sync_subscription_from_records(conn: &Connection, sub_id: &str) -> rusqlite::Result<()> {
+    // 查询 period_end 最大的账单记录
+    let latest: Option<(NaiveDate, NaiveDate, f64, String, Option<String>)> = conn.query_row(
+        "SELECT period_start, period_end, amount, currency, billing_cycle \
+         FROM billing_records WHERE subscription_id = ?1 \
+         ORDER BY period_end DESC LIMIT 1",
+        params![sub_id],
+        |row| {
+            Ok((
+                parse_date(&row.get::<_, String>(0)?),
+                parse_date(&row.get::<_, String>(1)?),
+                row.get::<_, f64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        },
+    ).optional()?;
+
+    let Some((period_start, period_end, _amount, _currency, record_cycle)) = latest else {
+        return Ok(()); // 没有账单记录，不修改
+    };
+
+    // 获取当前订阅信息
+    let sub = match get_subscription(conn, sub_id)? {
+        Some(s) => s,
+        None => return Ok(()),
+    };
+
+    // 用账单记录的周期（如有）来计算 next_bill_date，否则用订阅自身的周期
+    let cycle_for_calc: String = record_cycle
+        .filter(|c: &String| !c.is_empty())
+        .unwrap_or_else(|| sub.billing_cycle.clone());
+    let effective_cycle = BillingCycle::from_str(&cycle_for_calc)
+        .unwrap_or(BillingCycle::Month1);
+
+    // 计算 next_bill_date：从最新账单的 period_start 向前推进
+    let next_bill = if sub.is_one_time || sub.is_suspended {
+        sub.next_bill_date
+    } else {
+        Some(recalc_next_bill_date(period_start, &effective_cycle))
+    };
+
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    // 只同步 end_date 和 next_bill_date，不覆盖 price/currency/billing_cycle
+    // 订阅的 price 作为「原始价格」保留，effective_records 负责显示当前实际价格
+    conn.execute(
+        "UPDATE subscriptions SET end_date=?1, next_bill_date=?2, updated_at=?3 WHERE id=?4",
+        params![
+            period_end.to_string(),
+            next_bill.map(|d| d.to_string()),
+            now,
+            sub_id,
+        ],
+    )?;
+
+    log::info!("已同步订阅 {} 状态: end_date={}, next_bill={:?}",
+        sub_id, period_end, next_bill);
+
+    Ok(())
 }

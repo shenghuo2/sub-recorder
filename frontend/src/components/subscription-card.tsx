@@ -164,13 +164,13 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
       <div className="text-right shrink-0">
         <p className="font-bold text-lg">
           {formatCurrencyCompact(displayPrice, displayCurrency)}
-          {!sub.is_one_time && (
+          {(!sub.is_one_time || (hasRecords && displayCycle)) && (
             <span className="text-sm font-medium opacity-70">{getBillingCycleShort(displayCycle, getCycleFormat())}</span>
           )}
           {convertedAmount !== null && (
             <span className="opacity-60 ml-1">
               ≈ {formatCurrencyWithDecimals(convertedAmount, targetCurrency, decimals)}
-              {!sub.is_one_time && (
+              {(!sub.is_one_time || (hasRecords && estimateCycle)) && (
                 <span className="text-sm">{getBillingCycleShort(estimateCycle, cycleFmt)}</span>
               )}
             </span>

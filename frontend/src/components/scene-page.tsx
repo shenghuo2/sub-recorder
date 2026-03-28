@@ -407,7 +407,7 @@ export function ScenePage({ scenes, categories, onBack, onRefresh, initialSceneI
                 {!selectMode && (
                   <Button
                     size="icon"
-                    className="rounded-full h-10 w-10 md:h-12 md:w-12 shadow-lg"
+                    className="rounded-xl h-10 w-10 md:h-12 md:w-12 shadow-lg"
                     onClick={() => {
                       setEditingSub(null);
                       setDialogOpen(true);

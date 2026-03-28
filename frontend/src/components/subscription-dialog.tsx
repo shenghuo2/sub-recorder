@@ -201,18 +201,8 @@ export function SubscriptionDialog({
 
         <div className="grid gap-4 py-2">
           {/* 名称 + 图标 */}
-          <div className="flex gap-4 items-end">
-            <div className="flex-1 grid gap-2">
-              <Label htmlFor="name">名称</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="如：Netflix"
-              />
-            </div>
-            <div className="shrink-0 grid gap-2">
-              <Label>图标</Label>
+          <div className="flex gap-3 items-center">
+            <div className="shrink-0">
               <IconUpload
                 subscriptionId={subscription?.id}
                 currentIcon={icon}
@@ -223,6 +213,15 @@ export function SubscriptionDialog({
                     setIconMimeType(newMime);
                   }
                 }}
+              />
+            </div>
+            <div className="flex-1 grid gap-2">
+              <Label htmlFor="name">名称</Label>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="如：Netflix"
               />
             </div>
           </div>
@@ -341,11 +340,12 @@ export function SubscriptionDialog({
                 <button
                   key={c}
                   type="button"
-                  className="h-8 w-8 rounded-full border transition-transform hover:scale-110"
+                  className="h-8 w-8 rounded-full transition-transform hover:scale-110"
                   style={{
                     backgroundColor: c,
-                    borderColor: color === c ? "white" : "rgba(0,0,0,0.15)",
-                    boxShadow: color === c ? `0 0 0 2px ${c}` : "none",
+                    boxShadow: color === c
+                      ? `0 0 0 2px var(--background), 0 0 0 4px #9ca3af`
+                      : `inset 0 0 0 1px rgba(0,0,0,0.1)`,
                   }}
                   onClick={() => setColor(c)}
                 />
