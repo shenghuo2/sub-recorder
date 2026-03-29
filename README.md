@@ -131,81 +131,9 @@ docker exec sub-recorder /app/backend --reset-password
 sudo chown -R 1000:1000 ./data
 ```
 
-## 本地开发
+## 开发
 
-```bash
-# 后端 — 默认监听 :3456
-cd backend && cargo run
-
-# 前端 — 默认监听 :3000，API 代理到后端
-cd frontend && npm install && npm run dev
-```
-
-## 项目结构
-
-```
-sub-recorder/
-├── backend/                 # Rust 后端 (Actix-web)
-│   ├── src/
-│   │   ├── main.rs          # 入口 & 路由
-│   │   ├── handlers.rs      # API 处理器
-│   │   ├── db.rs            # 数据库操作
-│   │   ├── models.rs        # 数据模型
-│   │   └── auth.rs          # 鉴权中间件
-│   └── Cargo.toml
-├── frontend/                # Next.js 前端
-│   ├── src/
-│   │   ├── app/             # App Router
-│   │   ├── components/      # React 组件
-│   │   └── lib/             # API 客户端 & 工具
-│   └── package.json
-├── Dockerfile               # 多阶段构建
-├── docker-compose.yml
-└── README.md
-```
-
-## 技术栈
-
-| | 技术 |
-|---|---|
-| **前端** | Next.js 15 · React 19 · Tailwind CSS · shadcn/ui |
-| **后端** | Rust · Actix-web · SQLite |
-| **部署** | Docker · 多架构 (amd64/arm64) |
-
-### 架构概览
-
-```
-Docker Container
-┌─────────────────────────────────┐
-│  Rust (Actix-web) :3000        │
-│   /api/*  → API Handlers       │
-│   /*      → 静态文件 (SPA)     │
-│              │                  │
-│           SQLite                │
-│         /app/data/              │
-└─────────────────────────────────┘
-```
-
-- 单进程单端口，Rust 同时提供 API 和前端静态文件
-- 前端 Next.js 静态导出，无需 Node.js 运行时
-
-## API 概览
-
-| 端点 | 说明 |
-|------|------|
-| `GET/POST /api/subscriptions` | 订阅管理 |
-| `GET/POST /api/subscriptions/:id/bills` | 账单记录 |
-| `GET/POST /api/categories` | 分类管理 |
-| `GET/POST /api/scenes` | 场景管理 |
-| `GET/POST /api/notifications/channels` | 通知渠道 |
-| `POST /api/notifications/test` | 测试通知 |
-| `POST /api/auth/login` | 登录 |
-| `GET /api/auth/check` | 鉴权检查 |
-| `GET/PUT /api/auth/user` | 用户信息 |
-| `GET /api/export` | 导出全部数据 |
-| `POST /api/import/native` | 导入原生备份 |
-| `POST /api/import` | 批量导入（旧格式兼容） |
-| `GET /api/fetch-image` | 图片代理 |
+本地开发、项目结构、技术栈、API 等详见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## Roadmap
 
