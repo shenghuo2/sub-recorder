@@ -98,7 +98,9 @@ async fn main() -> std::io::Result<()> {
             .route("/api/scenes/{id}", web::get().to(handlers::get_scene))
             .route("/api/scenes/{id}", web::put().to(handlers::update_scene))
             .route("/api/scenes/{id}", web::delete().to(handlers::delete_scene))
-            // 导入
+            // 导入导出
+            .route("/api/export", web::get().to(handlers::export_data))
+            .route("/api/import/native", web::post().to(handlers::import_native_data))
             .route("/api/import", web::post().to(handlers::import_data))
             // 鉴权
             .route("/api/auth/login", web::post().to(handlers::login))

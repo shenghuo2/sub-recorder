@@ -19,6 +19,7 @@
 ## 功能特性
 
 - **订阅管理** — 添加 / 编辑 / 暂停 / 恢复，支持图标上传和批量导入
+- **数据导入导出** — 一键导出全部数据为 JSON，支持从备份文件恢复
 - **费用追踪** — 多币种、自动汇率换算、账单周期管理、历史账单记录
 - **场景分组** — 将订阅按场景归组，独立统计费用
 - **分类筛选** — 自定义分类与颜色标记，快速过滤
@@ -201,7 +202,9 @@ Docker Container
 | `POST /api/auth/login` | 登录 |
 | `GET /api/auth/check` | 鉴权检查 |
 | `GET/PUT /api/auth/user` | 用户信息 |
-| `POST /api/import` | 批量导入 |
+| `GET /api/export` | 导出全部数据 |
+| `POST /api/import/native` | 导入原生备份 |
+| `POST /api/import` | 批量导入（旧格式兼容） |
 | `GET /api/fetch-image` | 图片代理 |
 
 ## Roadmap

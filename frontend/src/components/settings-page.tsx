@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Check, RotateCcw, Server, RefreshCw, LogOut } from "lucide-react";
+import { Check, RotateCcw, Server, RefreshCw, LogOut, Download, Upload } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SUPPORTED_CURRENCIES, getSymbol, getCurrencyConfig, fetchExchangeRates, getCurrentExchangeRates, clearExchangeRatesCache } from "@/lib/currency";
-import { clearAuthToken, getAuthToken, getStoredUsername, updateUser, checkAuth, logout } from "@/lib/api";
+import { clearAuthToken, getAuthToken, getStoredUsername, updateUser, checkAuth, logout, exportData, importNativeData } from "@/lib/api";
 import { PasswordInput } from "@/components/ui/password-input";
 
 const API_URL_KEY = "sub_recorder_api_url";
@@ -327,6 +327,15 @@ export function SettingsPage() {
             </Select>
           </div>
 
+          <p className="text-xs text-muted-foreground">
+            开启后，非目标货币的金额后会显示 ≈ {getSymbol(targetCurrency)}xxx 的换算结果
+          </p>
+        </div>
+
+        {/* 显示设置 */}
+        <div className="space-y-4 p-4 rounded-xl border bg-card">
+          <div className="text-sm font-medium">显示设置</div>
+
           {/* Normalize Cycle */}
           <div className="space-y-2">
             <Label className="text-sm">统计均分周期</Label>
@@ -370,10 +379,6 @@ export function SettingsPage() {
               </SelectContent>
             </Select>
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            开启后，非目标货币的金额后会显示 ≈ {getSymbol(targetCurrency)}xxx 的换算结果
-          </p>
         </div>
 
         {/* 账户设置 */}
@@ -478,6 +483,73 @@ export function SettingsPage() {
             </Button>
           </div>
         )}
+        {/* 数据导入导出 */}
+        <div className="border-t pt-4 space-y-4">
+          <h3 className="font-medium text-sm">数据管理</h3>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={async () => {
+                try {
+                  const data = await exportData();
+                  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `sub-recorder-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  toast.success("数据已导出");
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "导出失败");
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              导出数据
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = ".json";
+                input.onchange = async (e) => {
+                  const file = (e.target as HTMLInputElement).files?.[0];
+                  if (!file) return;
+                  try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+                    // 判断格式：有 version 字段为原生格式，否则为旧格式
+                    let msg: string;
+                    if (data.version) {
+                      msg = await importNativeData(data);
+                    } else {
+                      // 旧格式兼容：直接传给 /api/import
+                      const { importData } = await import("@/lib/api");
+                      msg = await importData(Array.isArray(data) ? data : data.subscriptions || []);
+                    }
+                    toast.success(msg);
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : "导入失败，请检查文件格式");
+                  }
+                };
+                input.click();
+              }}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              导入数据
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            导出所有订阅、账单记录、分类、场景和通知渠道数据为 JSON 文件。导入时支持原生格式和旧版格式。
+          </p>
+        </div>
+
         {/* 关于 */}
         <div className="border-t pt-4 space-y-2">
           <h3 className="font-medium text-sm">关于</h3>

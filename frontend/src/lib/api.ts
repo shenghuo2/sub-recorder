@@ -244,6 +244,17 @@ export async function importData(data: unknown[]): Promise<string> {
   });
 }
 
+export async function exportData(): Promise<unknown> {
+  return request<unknown>("/api/export");
+}
+
+export async function importNativeData(data: unknown): Promise<string> {
+  return request<string>("/api/import/native", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export function getIconUrl(id: string): string {
   return `${getApiBase()}/api/subscriptions/${id}/icon`;
 }

@@ -1313,6 +1313,243 @@ pub fn delete_notification_channel(conn: &Connection, id: &str) -> rusqlite::Res
     Ok(())
 }
 
+// ========== 导出 ==========
+
+pub fn export_all_data(conn: &Connection) -> rusqlite::Result<serde_json::Value> {
+    // 分类
+    let categories = list_categories(conn)?;
+
+    // 订阅（含 icon BLOB → base64）
+    let sql = format!("SELECT {} FROM subscriptions ORDER BY created_at ASC", SUB_COLUMNS);
+    let mut stmt = conn.prepare(&sql)?;
+    let subs: Vec<Subscription> = stmt.query_map([], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
+
+    // 账单记录
+    let mut br_stmt = conn.prepare(
+        "SELECT id, subscription_id, period_start, period_end, amount, currency, billing_cycle, notes, paid_at, \
+         converted_amount, target_currency, exchange_rate, exchange_rate_date, created_at \
+         FROM billing_records ORDER BY subscription_id, period_start ASC"
+    )?;
+    let billing_records: Vec<BillingRecord> = br_stmt.query_map([], row_to_billing_record)?.collect::<Result<Vec<_>, _>>()?;
+
+    // 场景
+    let scene_sql = format!("SELECT {} FROM scenes ORDER BY created_at ASC", SCENE_COLUMNS);
+    let mut scene_stmt = conn.prepare(&scene_sql)?;
+    let scenes: Vec<Scene> = scene_stmt.query_map([], row_to_scene)?.collect::<Result<Vec<_>, _>>()?;
+
+    // 通知渠道
+    let channels = list_notification_channels(conn)?;
+
+    // 场景-订阅映射（scene_id, show_on_main 已在 subscription 里）
+
+    Ok(serde_json::json!({
+        "version": 1,
+        "exported_at": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        "categories": categories,
+        "subscriptions": subs,
+        "billing_records": billing_records,
+        "scenes": scenes,
+        "notification_channels": channels,
+    }))
+}
+
+// ========== 原生导入（从导出的 JSON 恢复） ==========
+
+pub fn import_native_data(conn: &Connection, data: &serde_json::Value) -> Result<String, String> {
+    // 验证格式
+    let version = data.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
+    if version < 1 {
+        return Err("无效的导出格式或版本号".to_string());
+    }
+
+    let mut stats = Vec::new();
+
+    // 1. 导入分类
+    if let Some(cats) = data.get("categories").and_then(|v| v.as_array()) {
+        let mut count = 0;
+        for cat in cats {
+            let id = cat.get("id").and_then(|v| v.as_i64()).unwrap_or(-1);
+            if id < 0 { continue; }
+            let name = cat.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let color = cat.get("color").and_then(|v| v.as_i64());
+            let icon = cat.get("icon").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let icon_mime = cat.get("icon_mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let fa_icon = cat.get("fa_icon").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let _ = create_category(conn, &CreateCategory {
+                id: Some(id), name, color, icon, icon_mime_type: icon_mime, fa_icon,
+            });
+            count += 1;
+        }
+        stats.push(format!("分类 {}", count));
+    }
+
+    // 2. 导入场景
+    if let Some(scenes) = data.get("scenes").and_then(|v| v.as_array()) {
+        let mut count = 0;
+        for s in scenes {
+            let id = match s.get("id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let color = s.get("color").and_then(|v| v.as_i64());
+            let icon = s.get("icon").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let icon_mime = s.get("icon_mime_type").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let billing_cycle = s.get("billing_cycle").and_then(|v| v.as_str()).unwrap_or("month_1");
+            let show_sub_logos = s.get("show_sub_logos").and_then(|v| v.as_bool()).unwrap_or(true);
+            let notes = s.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let link = s.get("link").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let created_at = s.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let now = if created_at.is_empty() {
+                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+            } else {
+                created_at.to_string()
+            };
+
+            let icon_blob: Option<Vec<u8>> = icon.as_ref().map(|s| {
+                use base64::Engine;
+                let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+                base64::engine::general_purpose::STANDARD.decode(&cleaned).unwrap_or_default()
+            });
+            let mime = icon.as_ref().map(|_| icon_mime.as_deref().unwrap_or("image/png").to_string());
+
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO scenes (id, name, color, icon, icon_mime_type, billing_cycle, show_sub_logos, notes, link, created_at) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                params![id, name, color, icon_blob, mime, billing_cycle, show_sub_logos as i32, notes, link, now],
+            );
+            count += 1;
+        }
+        stats.push(format!("场景 {}", count));
+    }
+
+    // 3. 导入订阅
+    if let Some(subs) = data.get("subscriptions").and_then(|v| v.as_array()) {
+        let mut count = 0;
+        for sub in subs {
+            let id = match sub.get("id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let name = sub.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let price = sub.get("price").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let currency = sub.get("currency").and_then(|v| v.as_str()).unwrap_or("CNY");
+            let billing_cycle = sub.get("billing_cycle").and_then(|v| v.as_str()).unwrap_or("month_1");
+            let billing_date = sub.get("billing_date").and_then(|v| v.as_str()).unwrap_or("2025-01-01");
+            let next_bill_date = sub.get("next_bill_date").and_then(|v| v.as_str());
+            let end_date = sub.get("end_date").and_then(|v| v.as_str());
+            let is_one_time = sub.get("is_one_time").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_suspended = sub.get("is_suspended").and_then(|v| v.as_bool()).unwrap_or(false);
+            let suspended_at = sub.get("suspended_at").and_then(|v| v.as_str());
+            let suspended_until = sub.get("suspended_until").and_then(|v| v.as_str());
+            let color = sub.get("color").and_then(|v| v.as_i64());
+            let icon = sub.get("icon").and_then(|v| v.as_str());
+            let icon_mime = sub.get("icon_mime_type").and_then(|v| v.as_str()).unwrap_or("image/png");
+            let should_be_tinted = sub.get("should_be_tinted").and_then(|v| v.as_bool()).unwrap_or(false);
+            let category_id = sub.get("category_id").and_then(|v| v.as_i64());
+            let notes = sub.get("notes").and_then(|v| v.as_str());
+            let link = sub.get("link").and_then(|v| v.as_str());
+            let is_reminder_enabled = sub.get("is_reminder_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let reminder_type = sub.get("reminder_type").and_then(|v| v.as_str());
+            let scene_id = sub.get("scene_id").and_then(|v| v.as_str());
+            let show_on_main = sub.get("show_on_main").and_then(|v| v.as_bool()).unwrap_or(true);
+            let created_at = sub.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let updated_at = sub.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let ca = if created_at.is_empty() { &now } else { created_at };
+            let ua = if updated_at.is_empty() { &now } else { updated_at };
+
+            let icon_blob: Option<Vec<u8>> = icon.map(|s| {
+                use base64::Engine;
+                let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+                base64::engine::general_purpose::STANDARD.decode(&cleaned).unwrap_or_default()
+            });
+
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO subscriptions (id, name, price, currency, billing_cycle, billing_date, \
+                 next_bill_date, end_date, is_one_time, is_suspended, suspended_at, suspended_until, \
+                 color, icon, icon_mime_type, should_be_tinted, category_id, notes, link, \
+                 is_reminder_enabled, reminder_type, scene_id, show_on_main, created_at, updated_at) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)",
+                params![
+                    id, name, price, currency, billing_cycle, billing_date,
+                    next_bill_date, end_date,
+                    is_one_time as i32, is_suspended as i32, suspended_at, suspended_until,
+                    color, icon_blob, icon_mime, should_be_tinted as i32, category_id,
+                    notes, link, is_reminder_enabled as i32, reminder_type, scene_id, show_on_main as i32,
+                    ca, ua,
+                ],
+            );
+            count += 1;
+        }
+        stats.push(format!("订阅 {}", count));
+    }
+
+    // 4. 导入账单记录
+    if let Some(records) = data.get("billing_records").and_then(|v| v.as_array()) {
+        let mut count = 0;
+        for r in records {
+            let sub_id = match r.get("subscription_id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let period_start = r.get("period_start").and_then(|v| v.as_str()).unwrap_or("");
+            let period_end = r.get("period_end").and_then(|v| v.as_str()).unwrap_or("");
+            if period_start.is_empty() || period_end.is_empty() { continue; }
+            let amount = r.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let currency = r.get("currency").and_then(|v| v.as_str()).unwrap_or("CNY");
+            let billing_cycle = r.get("billing_cycle").and_then(|v| v.as_str());
+            let notes = r.get("notes").and_then(|v| v.as_str());
+            let paid_at = r.get("paid_at").and_then(|v| v.as_str());
+            let converted_amount = r.get("converted_amount").and_then(|v| v.as_f64());
+            let target_currency = r.get("target_currency").and_then(|v| v.as_str());
+            let exchange_rate = r.get("exchange_rate").and_then(|v| v.as_f64());
+            let exchange_rate_date = r.get("exchange_rate_date").and_then(|v| v.as_str());
+
+            let _ = conn.execute(
+                "INSERT INTO billing_records (subscription_id, period_start, period_end, amount, currency, \
+                 billing_cycle, notes, paid_at, converted_amount, target_currency, exchange_rate, exchange_rate_date) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                params![
+                    sub_id, period_start, period_end, amount, currency,
+                    billing_cycle, notes, paid_at, converted_amount, target_currency, exchange_rate, exchange_rate_date,
+                ],
+            );
+            count += 1;
+        }
+        stats.push(format!("账单记录 {}", count));
+    }
+
+    // 5. 导入通知渠道
+    if let Some(channels) = data.get("notification_channels").and_then(|v| v.as_array()) {
+        let mut count = 0;
+        for ch in channels {
+            let id = match ch.get("id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let name = ch.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let channel_type = ch.get("channel_type").and_then(|v| v.as_str()).unwrap_or("");
+            let enabled = ch.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let config = ch.get("config").cloned().unwrap_or(serde_json::json!({}));
+            let config_str = serde_json::to_string(&config).unwrap_or_default();
+            let created_at = ch.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let ca = if created_at.is_empty() { &now } else { created_at };
+
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO notification_channels (id, name, channel_type, enabled, config, created_at, updated_at) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                params![id, name, channel_type, enabled as i32, config_str, ca, now],
+            );
+            count += 1;
+        }
+        stats.push(format!("通知渠道 {}", count));
+    }
+
+    Ok(format!("导入成功: {}", stats.join(", ")))
+}
+
 // ========== 辅助函数 ==========
 
 fn parse_date(s: &str) -> NaiveDate {

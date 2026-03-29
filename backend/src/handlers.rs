@@ -350,7 +350,30 @@ pub async fn delete_scene(
     }
 }
 
+// ========== 导出 ==========
+
+pub async fn export_data(
+    state: web::Data<AppState>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::export_all_data(&conn) {
+        Ok(data) => HttpResponse::Ok().json(ApiResponse::ok(data)),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
+    }
+}
+
 // ========== 导入 ==========
+
+pub async fn import_native_data(
+    state: web::Data<AppState>,
+    body: web::Json<serde_json::Value>,
+) -> HttpResponse {
+    let conn = state.db.lock().unwrap();
+    match db::import_native_data(&conn, &body) {
+        Ok(msg) => HttpResponse::Ok().json(ApiResponse::ok(msg)),
+        Err(e) => HttpResponse::BadRequest().json(ApiResponse::<()>::err(e)),
+    }
+}
 
 pub async fn import_data(
     state: web::Data<AppState>,
