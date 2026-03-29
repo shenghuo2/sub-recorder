@@ -182,12 +182,9 @@ export function SubscriptionCard({ subscription: sub, onClick, exchangeRates }: 
           </p>
         )}
         {isExpired ? (
-          <div className="relative inline-block">
-            <span className="text-xs opacity-40 blur-[1.5px] select-none">
-              {sub.end_date ? new Date(sub.end_date).toLocaleDateString("zh-CN") : "—"}
-            </span>
-            <span className="absolute inset-0 flex items-center justify-end text-xs font-medium opacity-80">已过期</span>
-          </div>
+          <p className="text-xs opacity-40 blur-[1.5px] select-none">
+            {sub.end_date ? new Date(sub.end_date).toLocaleDateString("zh-CN") : "—"}
+          </p>
         ) : (
           <p className="text-xs opacity-70">
             {nextDateStr
