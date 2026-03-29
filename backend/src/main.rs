@@ -43,10 +43,27 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
+    // --port / --host 优先于环境变量
+    let cli_port: Option<u16> = args.windows(2)
+        .find(|w| w[0] == "--port")
+        .and_then(|w| w[1].parse().ok());
+    let port: u16 = cli_port
+        .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
         .unwrap_or(3000);
+
+    let cli_host: Option<String> = args.windows(2)
+        .find(|w| w[0] == "--host")
+        .map(|w| w[1].clone());
+    let host: String = cli_host
+        .or_else(|| std::env::var("HOST").ok())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+
+    // 自动创建数据库所在目录
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).expect("Failed to create database directory");
+        }
+    }
 
     let conn = Connection::open(&db_path).expect("Failed to open database");
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
@@ -56,7 +73,7 @@ async fn main() -> std::io::Result<()> {
     let auth_enabled = !auth::is_auth_disabled();
     log::info!("数据库已初始化: {}", db_path);
     log::info!("鉴权状态: {}", if auth_enabled { "已启用" } else { "已禁用 (DISABLE_AUTH=true)" });
-    log::info!("服务启动在 http://0.0.0.0:{}", port);
+    log::info!("服务启动在 http://{}:{}", host, port);
 
     let state = web::Data::new(AppState { db: Mutex::new(conn) });
 
@@ -131,7 +148,7 @@ async fn main() -> std::io::Result<()> {
                 }
             })
     })
-    .bind(("0.0.0.0", port))?
+    .bind((&host[..], port))?
     .run()
     .await
 }
