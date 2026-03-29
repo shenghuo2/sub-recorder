@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title: "Sub Recorder",
   description: "订阅制服务记账与提醒",
   icons: {
-    icon: "/app-icon.svg",
+    icon: "/favicon.ico",
   },
 };
 
