@@ -92,7 +92,7 @@ docker run -d \
 ```bash
 git clone https://github.com/shenghuo2/sub-recorder.git
 cd sub-recorder
-docker compose up -d --build
+docker compose -f docker/docker-compose.yml up -d --build
 ```
 
 ## 配置

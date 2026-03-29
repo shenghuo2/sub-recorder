@@ -1,6 +1,8 @@
 services:
   sub-recorder:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: sub-recorder
     restart: unless-stopped
     ports:

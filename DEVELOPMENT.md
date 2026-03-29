@@ -28,8 +28,10 @@ sub-recorder/
 │   │   ├── components/      # React 组件
 │   │   └── lib/             # API 客户端 & 工具
 │   └── package.json
-├── Dockerfile               # 多阶段构建
-├── docker-compose.yml
+├── docker/
+│   ├── Dockerfile           # 完整多阶段构建（本地开发用）
+│   ├── Dockerfile.ci        # CI 用，接收预编译二进制
+│   └── docker-compose.yml
 └── README.md
 ```
 
