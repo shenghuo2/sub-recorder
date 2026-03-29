@@ -1,21 +1,10 @@
-# 接收预编译的后端二进制，只构建前端并打包运行时镜像
-# 用法: docker build --build-arg BINARY=path/to/sub-recorder -f docker/Dockerfile.ci .
+# 接收预编译的后端二进制和前端静态文件，仅打包运行时镜像
+# 用法: docker build --build-arg BINARY=... --build-arg STATIC=... -f docker/Dockerfile.ci .
 
-# ==================== 前端构建 ====================
-FROM node:20-alpine AS frontend-builder
-
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci
-
-COPY frontend/ ./
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
-
-# ==================== 最终镜像 ====================
 FROM alpine:3.20
 
-ARG BINARY=backend/target/release/sub-recorder
+ARG BINARY=docker/bin/sub-recorder
+ARG STATIC=docker/static
 
 RUN apk add --no-cache libgcc && \
     addgroup -g 1000 app && adduser -u 1000 -G app -s /bin/sh -D app
@@ -27,7 +16,7 @@ COPY --chown=app:app ${BINARY} /app/sub-recorder
 RUN chmod +x /app/sub-recorder
 
 # 复制前端静态文件
-COPY --from=frontend-builder --chown=app:app /app/frontend/out /app/static
+COPY --chown=app:app ${STATIC} /app/static
 
 # 创建数据目录
 RUN mkdir -p /app/data && chown app:app /app/data
