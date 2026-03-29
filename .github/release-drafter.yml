@@ -1,0 +1,65 @@
+name-template: 'Version: $RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+categories:
+  - title: '🚀 新功能'
+    labels:
+      - 'feature'
+      - 'enhancement'
+  - title: '🐛 Bug 修复'
+    labels:
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+  - title: '🎨 UI / 样式'
+    labels:
+      - 'ui'
+      - 'style'
+      - 'design'
+  - title: '🧰 维护'
+    labels:
+      - 'chore'
+      - 'dependencies'
+      - 'refactor'
+  - title: '📝 文档'
+    labels:
+      - 'documentation'
+      - 'docs'
+  - title: '🚦 测试'
+    labels:
+      - 'test'
+      - 'tests'
+exclude-labels:
+  - 'reverted'
+  - 'no-changelog'
+  - 'skip-changelog'
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+change-title-escapes: '\<*_&'
+version-resolver:
+  major:
+    labels:
+      - 'major'
+  minor:
+    labels:
+      - 'minor'
+  patch:
+    labels:
+      - 'patch'
+  default: patch
+template: |
+  > $RESOLVED_VERSION · $TODAY
+
+  ## Docker 镜像
+
+  支持 `linux/amd64` 和 `linux/arm64` 架构。
+
+  ```bash
+  docker pull shenghuo2/sub-recorder:v$RESOLVED_VERSION
+  ```
+
+  | 标签 | 链接 |
+  |------|------|
+  | `v$RESOLVED_VERSION` | [Docker Hub](https://hub.docker.com/r/shenghuo2/sub-recorder/tags?name=v$RESOLVED_VERSION) |
+
+  ## 更新内容
+
+  $CHANGES

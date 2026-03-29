@@ -180,6 +180,8 @@ jobs:
           {
             echo "body<<RELEASE_EOF"
 
+            echo "> $(date +%Y-%m-%d) · ${CURRENT_TAG}"
+            echo ""
             echo "## Docker 镜像"
             echo ""
             echo "支持 \`linux/amd64\` 和 \`linux/arm64\` 架构。"
@@ -191,9 +193,6 @@ jobs:
             echo "| 标签 | 链接 |"
             echo "|------|------|"
             echo "| \`${CURRENT_TAG}\` | [Docker Hub](https://hub.docker.com/r/${{ env.REGISTRY_IMAGE }}/tags?name=${CURRENT_TAG}) |"
-            if [ "${{ inputs.push_latest }}" = "true" ]; then
-              echo "| \`latest\` | [Docker Hub](https://hub.docker.com/r/${{ env.REGISTRY_IMAGE }}/tags?name=latest) |"
-            fi
             echo ""
 
             echo "## 更新内容"
@@ -218,7 +217,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
-          name: Release ${{ inputs.version }}
+          name: 'Version: ${{ inputs.version }}'
           body: ${{ steps.notes.outputs.body }}
           draft: false
           prerelease: false
