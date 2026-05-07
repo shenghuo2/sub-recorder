@@ -445,7 +445,7 @@ jobs:
           name: 'Version: ${{ inputs.version }}'
           body: ${{ steps.notes.outputs.body }}
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(inputs.version, '-') }}
           files: |
             /tmp/binaries/sub-recorder-linux-amd64.tar.gz
             /tmp/binaries/sub-recorder-linux-arm64.tar.gz
