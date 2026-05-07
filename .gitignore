@@ -26,3 +26,6 @@ frontend/.next
 *.swo
 example-part1.json
 example-full.json
+
+# AI
+CLAUDE.md

@@ -437,6 +437,12 @@ pub fn list_subscriptions(conn: &Connection) -> rusqlite::Result<Vec<Subscriptio
     let mut stmt = conn.prepare(&sql)?;
     let subs: Vec<Subscription> = stmt.query_map([], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
 
+    // 自动推进过期的 next_bill_date
+    let mut subs: Vec<Subscription> = subs;
+    for sub in &mut subs {
+        auto_advance_next_bill_date(conn, sub);
+    }
+
     let today = chrono::Local::now().date_naive();
     // 批量查询所有当前有效的账单记录（包含 billing_cycle）
     let mut br_stmt = conn.prepare(
@@ -760,10 +766,12 @@ fn row_to_billing_record(row: &rusqlite::Row) -> rusqlite::Result<BillingRecord>
 // ========== 订阅详情（含有效价格） ==========
 
 pub fn get_subscription_detail(conn: &Connection, id: &str) -> rusqlite::Result<Option<SubscriptionDetail>> {
-    let sub = match get_subscription(conn, id)? {
+    let mut sub = match get_subscription(conn, id)? {
         Some(s) => s,
         None => return Ok(None),
     };
+
+    auto_advance_next_bill_date(conn, &mut sub);
 
     let records = list_billing_records(conn, id)?;
 
@@ -885,7 +893,11 @@ fn build_scene_summary(conn: &Connection, scene: &Scene) -> rusqlite::Result<Sce
     let today = chrono::Local::now().date_naive();
     let sql = format!("SELECT {} FROM subscriptions WHERE scene_id = ?1 ORDER BY next_bill_date ASC NULLS LAST", SUB_COLUMNS);
     let mut stmt = conn.prepare(&sql)?;
-    let subs: Vec<Subscription> = stmt.query_map(params![scene.id], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
+    let mut subs: Vec<Subscription> = stmt.query_map(params![scene.id], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
+
+    for sub in &mut subs {
+        auto_advance_next_bill_date(conn, sub);
+    }
 
     // Query effective records for all subs in this scene
     let mut effective_map: std::collections::HashMap<String, Vec<EffectiveRecord>> = std::collections::HashMap::new();
@@ -1012,7 +1024,11 @@ pub fn get_scene_detail(conn: &Connection, id: &str) -> rusqlite::Result<Option<
     let today = chrono::Local::now().date_naive();
     let sql = format!("SELECT {} FROM subscriptions WHERE scene_id = ?1 ORDER BY next_bill_date ASC NULLS LAST, name ASC", SUB_COLUMNS);
     let mut stmt = conn.prepare(&sql)?;
-    let subs: Vec<Subscription> = stmt.query_map(params![id], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
+    let mut subs: Vec<Subscription> = stmt.query_map(params![id], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
+
+    for sub in &mut subs {
+        auto_advance_next_bill_date(conn, sub);
+    }
 
     // Batch query effective records for these subs
     let mut effective_map: std::collections::HashMap<String, Vec<EffectiveRecord>> = std::collections::HashMap::new();
@@ -1694,6 +1710,36 @@ fn recalc_next_bill_date(billing_date: NaiveDate, cycle: &BillingCycle) -> Naive
         next = cycle.next_date(next);
     }
     next
+}
+
+/// 自动推进过期的 next_bill_date（用于无结束日期的周期性订阅）
+/// 在读取订阅时调用，确保 UI 上始终显示正确的下一付款日期
+fn auto_advance_next_bill_date(conn: &Connection, sub: &mut Subscription) {
+    // 不处理：一次性订阅、已暂停、有结束日期、无 next_bill_date
+    if sub.is_one_time || sub.is_suspended || sub.end_date.is_some() {
+        return;
+    }
+    let Some(next_bill) = sub.next_bill_date else { return };
+
+    let today = chrono::Local::now().date_naive();
+    if next_bill >= today {
+        return; // 还没过期，不需要推进
+    }
+
+    let cycle = BillingCycle::from_str(&sub.billing_cycle).unwrap_or(BillingCycle::Month1);
+    let new_next = recalc_next_bill_date(sub.billing_date, &cycle);
+
+    // 写回数据库
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    if let Err(e) = conn.execute(
+        "UPDATE subscriptions SET next_bill_date=?1, updated_at=?2 WHERE id=?3",
+        params![new_next.to_string(), now, sub.id],
+    ) {
+        log::error!("自动推进 next_bill_date 失败: sub={}, error={}", sub.id, e);
+        return;
+    }
+
+    sub.next_bill_date = Some(new_next);
 }
 
 /// 根据账单记录同步订阅的 end_date、price、currency、billing_cycle、next_bill_date。
