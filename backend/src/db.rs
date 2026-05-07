@@ -114,6 +114,16 @@ pub fn init_db(conn: &Connection) {
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS reminder_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subscription_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            next_bill_date TEXT NOT NULL,
+            sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+            FOREIGN KEY (channel_id) REFERENCES notification_channels(id) ON DELETE CASCADE
+        );
     ").expect("Failed to initialize database");
 
     // Migration: add should_be_tinted column if not exists
@@ -1362,7 +1372,19 @@ pub fn export_all_data(conn: &Connection) -> rusqlite::Result<serde_json::Value>
     // 通知渠道
     let channels = list_notification_channels(conn)?;
 
-    // 场景-订阅映射（scene_id, show_on_main 已在 subscription 里）
+    // 提醒日志
+    let mut rl_stmt = conn.prepare(
+        "SELECT id, subscription_id, channel_id, next_bill_date, sent_at FROM reminder_logs ORDER BY sent_at DESC"
+    )?;
+    let reminder_logs: Vec<serde_json::Value> = rl_stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "subscription_id": row.get::<_, String>(1)?,
+            "channel_id": row.get::<_, String>(2)?,
+            "next_bill_date": row.get::<_, String>(3)?,
+            "sent_at": row.get::<_, String>(4)?,
+        }))
+    })?.collect::<Result<Vec<_>, _>>()?;
 
     Ok(serde_json::json!({
         "version": 1,
@@ -1372,6 +1394,7 @@ pub fn export_all_data(conn: &Connection) -> rusqlite::Result<serde_json::Value>
         "billing_records": billing_records,
         "scenes": scenes,
         "notification_channels": channels,
+        "reminder_logs": reminder_logs,
     }))
 }
 
@@ -1627,6 +1650,33 @@ pub fn import_native_data(conn: &Connection, data: &serde_json::Value) -> Result
         stats.push(format!("通知渠道 {}", count));
     }
 
+    // 6. 导入提醒日志
+    if let Some(logs) = data.get("reminder_logs").and_then(|v| v.as_array()) {
+        let mut count = 0;
+        for log in logs {
+            let sub_id = match log.get("subscription_id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let channel_id = match log.get("channel_id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let next_bill_date = log.get("next_bill_date").and_then(|v| v.as_str()).unwrap_or("");
+            let sent_at = log.get("sent_at").and_then(|v| v.as_str()).unwrap_or("");
+            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let sa = if sent_at.is_empty() { &now } else { sent_at };
+
+            tx.execute(
+                "INSERT INTO reminder_logs (subscription_id, channel_id, next_bill_date, sent_at) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![sub_id, channel_id, next_bill_date, sa],
+            ).map_err(|e| format!("导入提醒日志失败: {}", e))?;
+            count += 1;
+        }
+        stats.push(format!("提醒日志 {}", count));
+    }
+
     tx.commit().map_err(|e| e.to_string())?;
     Ok(format!("导入成功: {}", stats.join(", ")))
 }
@@ -1708,6 +1758,75 @@ pub fn sync_subscription_from_records(conn: &Connection, sub_id: &str) -> rusqli
     log::info!("已同步订阅 {} 状态: end_date={}, next_bill={:?}",
         sub_id, period_end, next_bill);
 
+    Ok(())
+}
+
+// ========== 提醒功能 ==========
+
+/// 根据订阅的提醒类型计算出触发日期相对于 next_bill_date 的偏移（天）
+fn reminder_offset_days(reminder_type: &str) -> i64 {
+    match reminder_type {
+        "same_day" => 0,
+        "one_day" => 1,
+        "three_days" => 3,
+        "one_week" => 7,
+        _ => 1, // 默认提前 1 天
+    }
+}
+
+/// 查询所有需要发送提醒的订阅
+pub fn get_due_reminder_subscriptions(conn: &Connection) -> rusqlite::Result<Vec<Subscription>> {
+    // 查询所有启用了提醒、未暂停、非一次性、有 next_bill_date 的订阅
+    let sql = format!(
+        "SELECT {} FROM subscriptions \
+         WHERE is_reminder_enabled = 1 \
+         AND is_suspended = 0 \
+         AND is_one_time = 0 \
+         AND next_bill_date IS NOT NULL \
+         AND reminder_type IS NOT NULL \
+         AND reminder_type != '' \
+         ORDER BY next_bill_date ASC",
+        SUB_COLUMNS
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |row| row_to_subscription(row))?;
+
+    let today = chrono::Local::now().date_naive();
+    let mut due: Vec<Subscription> = Vec::new();
+
+    for sub in rows {
+        let sub = sub?;
+        let Some(next_bill) = sub.next_bill_date else { continue };
+        let offset = reminder_offset_days(sub.reminder_type.as_deref().unwrap_or("one_day"));
+        // 如果 next_bill_date 已经进入提醒窗口则触发
+        let trigger_date = next_bill - chrono::Days::new(offset as u64);
+        if today >= trigger_date {
+            due.push(sub);
+        }
+    }
+
+    Ok(due)
+}
+
+/// 检查某个订阅+渠道+next_bill_date 组合是否已发送过提醒
+pub fn has_reminder_been_sent(conn: &Connection, sub_id: &str, channel_id: &str, next_bill_date: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM reminder_logs \
+         WHERE subscription_id = ?1 AND channel_id = ?2 AND next_bill_date = ?3",
+        params![sub_id, channel_id, next_bill_date],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count > 0)
+    .unwrap_or(false)
+}
+
+/// 记录一条提醒已发送
+pub fn record_reminder_sent(conn: &Connection, sub_id: &str, channel_id: &str, next_bill_date: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO reminder_logs (subscription_id, channel_id, next_bill_date) VALUES (?1, ?2, ?3)",
+        params![sub_id, channel_id, next_bill_date],
+    )?;
     Ok(())
 }
 

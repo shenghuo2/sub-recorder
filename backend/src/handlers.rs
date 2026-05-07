@@ -1085,3 +1085,278 @@ async fn do_test_telegram(config: &serde_json::Value) -> HttpResponse {
         }
     }
 }
+
+// ========== 提醒发送 ==========
+
+/// 构建提醒消息文本
+fn build_reminder_message(sub: &Subscription) -> (String, String) {
+    let name = &sub.name;
+    let price = format!("{} {}", sub.price, sub.currency);
+    let next_bill = sub.next_bill_date.map(|d| d.to_string()).unwrap_or_default();
+    let cycle = &sub.billing_cycle;
+    let cycle_label = match cycle.as_str() {
+        "daily" => "每天",
+        "weekly" => "每周",
+        "month_1" => "每月",
+        "month_2" => "每2月",
+        "month_3" => "每3月",
+        "month_6" => "每6月",
+        "year_1" => "每年",
+        "year_2" => "每2年",
+        "year_3" => "每3年",
+        _ => cycle,
+    };
+
+    let title = format!("[Sub Recorder] 订阅到期提醒 - {}", name);
+    let body = format!(
+        "订阅: {}\n金额: {}\n周期: {}\n下次付款: {}",
+        name, price, cycle_label, next_bill
+    );
+
+    (title, body)
+}
+
+async fn send_smtp_reminder(cfg: &SmtpChannelConfig, sub: &Subscription) -> Result<(), String> {
+    use mail_send::{SmtpClientBuilder, mail_builder::MessageBuilder};
+
+    let (subject, body) = build_reminder_message(sub);
+
+    let message = MessageBuilder::new()
+        .from((cfg.from_name.as_str(), cfg.from_email.as_str()))
+        .to(cfg.to_email.as_str())
+        .subject(subject)
+        .text_body(body);
+
+    let creds = (cfg.username.clone(), cfg.password.clone());
+    let use_implicit_tls = cfg.port == 465;
+
+    let conn_result = if cfg.use_tls {
+        SmtpClientBuilder::new(cfg.host.clone(), cfg.port as u16)
+            .implicit_tls(use_implicit_tls)
+            .credentials(creds)
+            .connect().await
+    } else {
+        SmtpClientBuilder::new(cfg.host.clone(), cfg.port as u16)
+            .implicit_tls(false)
+            .allow_invalid_certs()
+            .credentials(creds)
+            .connect().await
+    };
+
+    let mut client = conn_result.map_err(|e| format!("SMTP 连接失败: {}", e))?;
+    client.send(message).await.map_err(|e| format!("SMTP 发送失败: {}", e))?;
+    Ok(())
+}
+
+async fn send_onebot_reminder(cfg: &WebhookChannelConfig, sub: &Subscription) -> Result<(), String> {
+    let url = cfg.url.trim_end_matches('/');
+    let target_id = cfg.target_id.as_deref().unwrap_or("");
+    if target_id.is_empty() {
+        return Err("缺少 OneBot 目标 ID".to_string());
+    }
+
+    let msg_type = cfg.message_type.as_deref().unwrap_or("private");
+    let endpoint = match msg_type {
+        "group" => format!("{}/send_group_msg", url),
+        _ => format!("{}/send_private_msg", url),
+    };
+
+    let (_title, body) = build_reminder_message(sub);
+    let payload = match msg_type {
+        "group" => serde_json::json!({
+            "group_id": target_id.parse::<i64>().unwrap_or(0),
+            "message": body,
+        }),
+        _ => serde_json::json!({
+            "user_id": target_id.parse::<i64>().unwrap_or(0),
+            "message": body,
+        }),
+    };
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&endpoint);
+
+    if let Some(token) = &cfg.access_token
+        && !token.is_empty()
+    {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+
+    let resp = req.json(&payload).send().await.map_err(|e| format!("OneBot 请求失败: {}", e))?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("OneBot 返回 {}", resp.status()))
+    }
+}
+
+async fn send_telegram_reminder(cfg: &WebhookChannelConfig, sub: &Subscription) -> Result<(), String> {
+    let bot_token = cfg.bot_token.as_deref().unwrap_or("");
+    let chat_id = cfg.chat_id.as_deref().unwrap_or("");
+    if bot_token.is_empty() || chat_id.is_empty() {
+        return Err("缺少 Telegram bot_token 或 chat_id".to_string());
+    }
+
+    let (_title, body) = build_reminder_message(sub);
+    let url = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
+    let payload = serde_json::json!({
+        "chat_id": chat_id,
+        "text": body,
+        "disable_notification": cfg.silent.unwrap_or(false),
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client.post(&url).json(&payload).send().await.map_err(|e| format!("Telegram 请求失败: {}", e))?;
+
+    if resp.status().is_success() {
+        let json: serde_json::Value = resp.json().await.unwrap_or_default();
+        if json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+            Ok(())
+        } else {
+            let desc = json.get("description").and_then(|v| v.as_str()).unwrap_or("未知错误");
+            Err(format!("Telegram 错误: {}", desc))
+        }
+    } else {
+        Err(format!("Telegram 返回 {}", resp.status()))
+    }
+}
+
+async fn send_webhook_reminder(cfg: &WebhookChannelConfig, sub: &Subscription) -> Result<(), String> {
+    let (title, body) = build_reminder_message(sub);
+    let text = cfg.body_template
+        .replace("{title}", &title)
+        .replace("{message}", &body)
+        .replace("{subscription}", &sub.name);
+    let payload = serde_json::from_str(&text).unwrap_or(serde_json::json!({"text": text}));
+
+    let client = reqwest::Client::new();
+    let mut req = match cfg.method.to_uppercase().as_str() {
+        "GET" => client.get(&cfg.url),
+        _ => client.post(&cfg.url),
+    };
+
+    if let Some(headers) = &cfg.headers
+        && let Some(obj) = headers.as_object()
+    {
+        for (k, v) in obj {
+            if let Some(s) = v.as_str() { req = req.header(k, s); }
+        }
+    }
+
+    if cfg.method.to_uppercase() != "GET" {
+        req = req.json(&payload);
+    }
+
+    let resp = req.send().await.map_err(|e| format!("Webhook 请求失败: {}", e))?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("Webhook 返回 {}", resp.status()))
+    }
+}
+
+/// 为单个订阅发送提醒（遍历所有已启用的通知渠道）
+async fn send_reminder_for_subscription(state: &web::Data<AppState>, sub: &Subscription) {
+    let channels = {
+        let conn = state.db.lock().unwrap();
+        match db::list_notification_channels(&conn) {
+            Ok(chs) => chs,
+            Err(e) => {
+                log::error!("查询通知渠道失败: {}", e);
+                return;
+            }
+        }
+    };
+
+    let Some(next_bill_date) = sub.next_bill_date.map(|d| d.to_string()) else {
+        return;
+    };
+
+    for ch in channels {
+        if !ch.enabled {
+            continue;
+        }
+
+        // 跳过已发送的
+        {
+            let conn = state.db.lock().unwrap();
+            if db::has_reminder_been_sent(&conn, &sub.id, &ch.id, &next_bill_date) {
+                continue;
+            }
+        }
+
+        let result: Result<(), String> = match ch.channel_type.as_str() {
+            "smtp" => {
+                match serde_json::from_value::<SmtpChannelConfig>(ch.config.clone()) {
+                    Ok(cfg) => send_smtp_reminder(&cfg, sub).await,
+                    Err(e) => Err(format!("SMTP 配置解析失败: {}", e)),
+                }
+            }
+            "onebot" => {
+                match serde_json::from_value::<WebhookChannelConfig>(ch.config.clone()) {
+                    Ok(cfg) => send_onebot_reminder(&cfg, sub).await,
+                    Err(e) => Err(format!("OneBot 配置解析失败: {}", e)),
+                }
+            }
+            "telegram" => {
+                match serde_json::from_value::<WebhookChannelConfig>(ch.config.clone()) {
+                    Ok(cfg) => send_telegram_reminder(&cfg, sub).await,
+                    Err(e) => Err(format!("Telegram 配置解析失败: {}", e)),
+                }
+            }
+            "webhook" => {
+                match serde_json::from_value::<WebhookChannelConfig>(ch.config.clone()) {
+                    Ok(cfg) => send_webhook_reminder(&cfg, sub).await,
+                    Err(e) => Err(format!("Webhook 配置解析失败: {}", e)),
+                }
+            }
+            _ => {
+                log::warn!("未知通知渠道类型: {}", ch.channel_type);
+                continue;
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                log::info!("提醒已发送: sub={}, channel={}({})", sub.id, ch.name, ch.channel_type);
+                let conn = state.db.lock().unwrap();
+                if let Err(e) = db::record_reminder_sent(&conn, &sub.id, &ch.id, &next_bill_date) {
+                    log::error!("记录提醒日志失败: {}", e);
+                }
+            }
+            Err(e) => {
+                log::error!("提醒发送失败: sub={}, channel={}, error={}", sub.id, ch.name, e);
+            }
+        }
+    }
+}
+
+/// 执行一次提醒检查（供后台任务和手动触发共用）
+pub async fn run_reminder_check(state: &web::Data<AppState>) {
+    let due_subs = {
+        let conn = state.db.lock().unwrap();
+        match db::get_due_reminder_subscriptions(&conn) {
+            Ok(subs) => subs,
+            Err(e) => {
+                log::error!("查询待提醒订阅失败: {}", e);
+                return;
+            }
+        }
+    };
+
+    if due_subs.is_empty() {
+        return;
+    }
+
+    log::info!("发现 {} 个订阅需要发送提醒", due_subs.len());
+
+    for sub in &due_subs {
+        send_reminder_for_subscription(state, sub).await;
+    }
+}
+
+/// 手动触发提醒检查
+pub async fn trigger_reminders(state: web::Data<AppState>) -> HttpResponse {
+    run_reminder_check(&state).await;
+    HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"message": "提醒检查完成"})))
+}

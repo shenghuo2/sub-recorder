@@ -8,6 +8,7 @@ use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, middleware};
 use db::AppState;
 use rusqlite::Connection;
 use std::sync::Mutex;
+use std::time::Duration;
 
 fn static_dir() -> String {
     std::env::var("STATIC_DIR").unwrap_or_else(|_| "./static".to_string())
@@ -77,6 +78,23 @@ async fn main() -> std::io::Result<()> {
 
     let state = web::Data::new(AppState { db: Mutex::new(conn) });
 
+    // 后台提醒任务：定期检查并发送到期提醒
+    let reminder_state = state.clone();
+    let interval_secs: u64 = std::env::var("REMINDER_CHECK_INTERVAL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3600);
+    actix_web::rt::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+        // 启动后延迟 30 秒再首次检查，避免干扰启动流程
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        loop {
+            interval.tick().await;
+            handlers::run_reminder_check(&reminder_state).await;
+        }
+    });
+    log::info!("提醒检查已启动，间隔 {} 秒", interval_secs);
+
     HttpServer::new(move || {
         let cors = Cors::permissive();
         let json_cfg = web::JsonConfig::default().limit(10 * 1024 * 1024); // 10MB
@@ -134,6 +152,7 @@ async fn main() -> std::io::Result<()> {
             .route("/api/notifications/channels/{id}", web::put().to(handlers::update_notification_channel))
             .route("/api/notifications/channels/{id}", web::delete().to(handlers::delete_notification_channel))
             .route("/api/notifications/test", web::post().to(handlers::test_notification))
+            .route("/api/notifications/trigger-reminders", web::post().to(handlers::trigger_reminders))
             // 静态文件 + SPA fallback（目录存在时才注册）
             .configure(|cfg| {
                 let dir = static_dir();
