@@ -1845,9 +1845,9 @@ pub fn get_due_reminder_subscriptions(conn: &Connection) -> rusqlite::Result<Vec
         let sub = sub?;
         let Some(next_bill) = sub.next_bill_date else { continue };
         let offset = reminder_offset_days(sub.reminder_type.as_deref().unwrap_or("one_day"));
-        // 如果 next_bill_date 已经进入提醒窗口则触发
+        // 只在提醒窗口内触发：不早于 trigger_date，且不晚于到期日
         let trigger_date = next_bill - chrono::Days::new(offset as u64);
-        if today >= trigger_date {
+        if today >= trigger_date && today <= next_bill {
             due.push(sub);
         }
     }
