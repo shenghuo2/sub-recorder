@@ -435,19 +435,18 @@ pub async fn import_data(
 
     for item in &subscriptions {
         // Ensure category exists for this subscription's categoryId
-        if let Some(cat_id) = item.get("categoryId").and_then(|v| v.as_i64()) {
-            if cat_id > 0 && !known_cat_ids.contains(&cat_id) {
-                if db::get_category(&conn, cat_id).ok().flatten().is_none() {
-                    let _ = db::create_category(&conn, &CreateCategory {
-                        id: Some(cat_id),
-                        name: format!("未知分类 {}", cat_id),
-                        color: None,
-                        icon: None,
-                        icon_mime_type: None,
-                        fa_icon: None,
-                    });
-                }
-            }
+        if let Some(cat_id) = item.get("categoryId").and_then(|v| v.as_i64())
+            && cat_id > 0 && !known_cat_ids.contains(&cat_id)
+            && db::get_category(&conn, cat_id).ok().flatten().is_none()
+        {
+            let _ = db::create_category(&conn, &CreateCategory {
+                id: Some(cat_id),
+                name: format!("未知分类 {}", cat_id),
+                color: None,
+                icon: None,
+                icon_mime_type: None,
+                fa_icon: None,
+            });
         }
 
         match import_single_subscription(&conn, item) {
@@ -942,20 +941,19 @@ async fn do_test_webhook(config: &serde_json::Value) -> HttpResponse {
     };
 
     // 添加 OneBot Access Token
-    if cfg.webhook_type == "onebot" {
-        if let Some(token) = &cfg.access_token {
-            if !token.is_empty() {
-                req = req.header("Authorization", format!("Bearer {}", token));
-            }
-        }
+    if cfg.webhook_type == "onebot"
+        && let Some(token) = &cfg.access_token
+        && !token.is_empty()
+    {
+        req = req.header("Authorization", format!("Bearer {}", token));
     }
 
     // 添加自定义 headers
-    if let Some(headers) = &cfg.headers {
-        if let Some(obj) = headers.as_object() {
-            for (k, v) in obj {
-                if let Some(s) = v.as_str() { req = req.header(k, s); }
-            }
+    if let Some(headers) = &cfg.headers
+        && let Some(obj) = headers.as_object()
+    {
+        for (k, v) in obj {
+            if let Some(s) = v.as_str() { req = req.header(k, s); }
         }
     }
 
@@ -1013,10 +1011,10 @@ async fn do_test_onebot(config: &serde_json::Value) -> HttpResponse {
     let client = reqwest::Client::new();
     let mut req = client.post(&endpoint);
 
-    if let Some(token) = access_token {
-        if !token.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", token));
-        }
+    if let Some(token) = access_token
+        && !token.is_empty()
+    {
+        req = req.header("Authorization", format!("Bearer {}", token));
     }
 
     req = req.json(&body);

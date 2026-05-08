@@ -9,6 +9,20 @@ pub struct AppState {
     pub db: Mutex<Connection>,
 }
 
+// ========== 时间戳辅助函数 ==========
+
+fn now_timestamp() -> String {
+    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn now_iso_timestamp() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+fn today_date() -> NaiveDate {
+    chrono::Local::now().date_naive()
+}
+
 pub fn init_db(conn: &Connection) {
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS categories (
@@ -370,7 +384,7 @@ const SUB_COLUMNS: &str = "id, name, price, currency, billing_cycle, billing_dat
 
 pub fn create_subscription(conn: &Connection, input: &CreateSubscription) -> rusqlite::Result<Subscription> {
     let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = now_timestamp();
 
     let cycle = BillingCycle::from_str(&input.billing_cycle)
         .unwrap_or(BillingCycle::Month1);
@@ -435,15 +449,25 @@ pub fn get_subscription(conn: &Connection, id: &str) -> rusqlite::Result<Option<
 pub fn list_subscriptions(conn: &Connection) -> rusqlite::Result<Vec<SubscriptionWithEffective>> {
     let sql = format!("SELECT {} FROM subscriptions ORDER BY next_bill_date ASC NULLS LAST, name ASC", SUB_COLUMNS);
     let mut stmt = conn.prepare(&sql)?;
-    let subs: Vec<Subscription> = stmt.query_map([], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
+    let mut subs: Vec<Subscription> = stmt.query_map([], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
 
-    // 自动推进过期的 next_bill_date
-    let mut subs: Vec<Subscription> = subs;
+    // 批量推进过期的 next_bill_date
+    let today = today_date();
+    let now = now_timestamp();
+    let mut updates = Vec::new();
     for sub in &mut subs {
-        auto_advance_next_bill_date(conn, sub);
+        if let Some(new_next) = calc_advance_next_bill_date(sub, today) {
+            updates.push((new_next.to_string(), sub.id.clone()));
+            sub.next_bill_date = Some(new_next);
+        }
+    }
+    for (new_next, id) in updates {
+        conn.execute(
+            "UPDATE subscriptions SET next_bill_date=?1, updated_at=?2 WHERE id=?3",
+            params![new_next, now, id],
+        )?;
     }
 
-    let today = chrono::Local::now().date_naive();
     // 批量查询所有当前有效的账单记录（包含 billing_cycle）
     let mut br_stmt = conn.prepare(
         "SELECT subscription_id, amount, currency, billing_cycle FROM billing_records \
@@ -458,14 +482,12 @@ pub fn list_subscriptions(conn: &Connection) -> rusqlite::Result<Vec<Subscriptio
             row.get::<_, Option<String>>(3)?,
         ))
     })?;
-    for r in rows {
-        if let Ok((sub_id, amount, currency, cycle)) = r {
-            effective_map.entry(sub_id.clone()).or_default().push(EffectiveRecord {
-                amount,
-                currency,
-                billing_cycle: cycle.unwrap_or_default(), // empty string is falsy in JS, frontend falls back to sub default
-            });
-        }
+    for (sub_id, amount, currency, cycle) in rows.flatten() {
+        effective_map.entry(sub_id.clone()).or_default().push(EffectiveRecord {
+            amount,
+            currency,
+            billing_cycle: cycle.unwrap_or_default(),
+        });
     }
 
     let result = subs.into_iter().map(|s| {
@@ -530,7 +552,7 @@ pub fn update_subscription(conn: &Connection, id: &str, input: &UpdateSubscripti
         base64::engine::general_purpose::STANDARD.decode(s).unwrap_or_default()
     });
 
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = now_timestamp();
 
     if let Some(blob) = &icon_blob {
         conn.execute(
@@ -585,14 +607,14 @@ pub fn suspend_subscription(conn: &Connection, id: &str, req: &SuspendRequest) -
         return Ok(Some(existing));
     }
 
-    let today = chrono::Local::now().date_naive();
+    let today = today_date();
     let suspend_from = req.suspend_from.unwrap_or(today);
 
     // suspended_until = 当前周期的结束日期（即已付费的最后日期）
     // 如果有 next_bill_date，那就是已经付到 next_bill_date 前一天
     let suspended_until = existing.next_bill_date.unwrap_or(suspend_from);
 
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = now_timestamp();
     conn.execute(
         "UPDATE subscriptions SET is_suspended=1, suspended_at=?1, suspended_until=?2, \
          next_bill_date=NULL, updated_at=?3 WHERE id=?4",
@@ -611,13 +633,13 @@ pub fn resume_subscription(conn: &Connection, id: &str, req: &ResumeRequest) -> 
         return Ok(Some(existing));
     }
 
-    let today = chrono::Local::now().date_naive();
+    let today = today_date();
     let resume_from = req.resume_from.unwrap_or(today);
 
     let cycle = BillingCycle::from_str(&existing.billing_cycle).unwrap_or(BillingCycle::Month1);
     let next_bill = cycle.next_date(resume_from);
 
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = now_timestamp();
     conn.execute(
         "UPDATE subscriptions SET is_suspended=0, suspended_at=NULL, suspended_until=NULL, \
          billing_date=?1, next_bill_date=?2, updated_at=?3 WHERE id=?4",
@@ -736,10 +758,8 @@ pub fn delete_billing_record(conn: &Connection, id: i64) -> rusqlite::Result<boo
     ).optional()?;
 
     let affected = conn.execute("DELETE FROM billing_records WHERE id = ?1", params![id])?;
-    if affected > 0 {
-        if let Some(sub_id) = sub_id {
-            sync_subscription_from_records(conn, &sub_id)?;
-        }
+    if affected > 0 && let Some(sub_id) = sub_id {
+        sync_subscription_from_records(conn, &sub_id)?;
     }
     Ok(affected > 0)
 }
@@ -775,7 +795,7 @@ pub fn get_subscription_detail(conn: &Connection, id: &str) -> rusqlite::Result<
 
     let records = list_billing_records(conn, id)?;
 
-    let today = chrono::Local::now().date_naive();
+    let today = today_date();
     let effective_records: Vec<EffectiveRecord> = records.iter()
         .filter(|r| r.period_start <= today && r.period_end > today)
         .map(|r| EffectiveRecord {
@@ -797,7 +817,7 @@ pub fn get_subscription_detail(conn: &Connection, id: &str) -> rusqlite::Result<
 pub fn update_subscription_icon(conn: &Connection, id: &str, icon_base64: &str, mime_type: &str) -> rusqlite::Result<bool> {
     use base64::Engine;
     let blob = base64::engine::general_purpose::STANDARD.decode(icon_base64).unwrap_or_default();
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = now_timestamp();
     let affected = conn.execute(
         "UPDATE subscriptions SET icon=?1, icon_mime_type=?2, updated_at=?3 WHERE id=?4",
         params![blob, mime_type, now, id],
@@ -844,7 +864,7 @@ const SCENE_COLUMNS: &str = "id, name, color, icon, icon_mime_type, billing_cycl
 
 pub fn create_scene(conn: &Connection, input: &CreateScene) -> rusqlite::Result<Scene> {
     let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = now_timestamp();
     let billing_cycle = input.billing_cycle.as_deref().unwrap_or("month_1");
     let show_sub_logos = input.show_sub_logos.unwrap_or(true);
 
@@ -890,13 +910,25 @@ pub fn list_scenes(conn: &Connection) -> rusqlite::Result<Vec<SceneWithSummary>>
 }
 
 fn build_scene_summary(conn: &Connection, scene: &Scene) -> rusqlite::Result<SceneWithSummary> {
-    let today = chrono::Local::now().date_naive();
     let sql = format!("SELECT {} FROM subscriptions WHERE scene_id = ?1 ORDER BY next_bill_date ASC NULLS LAST", SUB_COLUMNS);
     let mut stmt = conn.prepare(&sql)?;
     let mut subs: Vec<Subscription> = stmt.query_map(params![scene.id], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
 
+    // 批量推进过期的 next_bill_date
+    let today = today_date();
+    let now = now_timestamp();
+    let mut updates = Vec::new();
     for sub in &mut subs {
-        auto_advance_next_bill_date(conn, sub);
+        if let Some(new_next) = calc_advance_next_bill_date(sub, today) {
+            updates.push((new_next.to_string(), sub.id.clone()));
+            sub.next_bill_date = Some(new_next);
+        }
+    }
+    for (new_next, id) in updates {
+        conn.execute(
+            "UPDATE subscriptions SET next_bill_date=?1, updated_at=?2 WHERE id=?3",
+            params![new_next, now, id],
+        )?;
     }
 
     // Query effective records for all subs in this scene
@@ -914,14 +946,12 @@ fn build_scene_summary(conn: &Connection, scene: &Scene) -> rusqlite::Result<Sce
                 row.get::<_, Option<String>>(3)?,
             ))
         })?;
-        for r in rows {
-            if let Ok((sub_id, amount, currency, cycle)) = r {
-                effective_map.entry(sub_id).or_default().push(EffectiveRecord {
-                    amount,
-                    currency,
-                    billing_cycle: cycle.unwrap_or_default(),
-                });
-            }
+        for (sub_id, amount, currency, cycle) in rows.flatten() {
+            effective_map.entry(sub_id).or_default().push(EffectiveRecord {
+                amount,
+                currency,
+                billing_cycle: cycle.unwrap_or_default(),
+            });
         }
     }
 
@@ -1021,13 +1051,25 @@ pub fn get_scene_detail(conn: &Connection, id: &str) -> rusqlite::Result<Option<
         None => return Ok(None),
     };
 
-    let today = chrono::Local::now().date_naive();
     let sql = format!("SELECT {} FROM subscriptions WHERE scene_id = ?1 ORDER BY next_bill_date ASC NULLS LAST, name ASC", SUB_COLUMNS);
     let mut stmt = conn.prepare(&sql)?;
     let mut subs: Vec<Subscription> = stmt.query_map(params![id], row_to_subscription)?.collect::<Result<Vec<_>, _>>()?;
 
+    // 批量推进过期的 next_bill_date
+    let today = today_date();
+    let now = now_timestamp();
+    let mut updates = Vec::new();
     for sub in &mut subs {
-        auto_advance_next_bill_date(conn, sub);
+        if let Some(new_next) = calc_advance_next_bill_date(sub, today) {
+            updates.push((new_next.to_string(), sub.id.clone()));
+            sub.next_bill_date = Some(new_next);
+        }
+    }
+    for (new_next, id) in updates {
+        conn.execute(
+            "UPDATE subscriptions SET next_bill_date=?1, updated_at=?2 WHERE id=?3",
+            params![new_next, now, id],
+        )?;
     }
 
     // Batch query effective records for these subs
@@ -1045,14 +1087,12 @@ pub fn get_scene_detail(conn: &Connection, id: &str) -> rusqlite::Result<Option<
                 row.get::<_, Option<String>>(3)?,
             ))
         })?;
-        for r in rows {
-            if let Ok((sub_id, amount, currency, cycle)) = r {
-                effective_map.entry(sub_id).or_default().push(EffectiveRecord {
-                    amount,
-                    currency,
-                    billing_cycle: cycle.unwrap_or_default(),
-                });
-            }
+        for (sub_id, amount, currency, cycle) in rows.flatten() {
+            effective_map.entry(sub_id).or_default().push(EffectiveRecord {
+                amount,
+                currency,
+                billing_cycle: cycle.unwrap_or_default(),
+            });
         }
     }
 
@@ -1317,7 +1357,7 @@ pub fn list_notification_channels(conn: &Connection) -> rusqlite::Result<Vec<Not
         "SELECT id, name, channel_type, enabled, config, created_at, updated_at
          FROM notification_channels ORDER BY created_at DESC"
     )?;
-    let rows = stmt.query_map([], |row| row_to_channel(row))?;
+    let rows = stmt.query_map([], row_to_channel)?;
     rows.collect()
 }
 
@@ -1326,7 +1366,7 @@ pub fn get_notification_channel(conn: &Connection, id: &str) -> rusqlite::Result
         "SELECT id, name, channel_type, enabled, config, created_at, updated_at
          FROM notification_channels WHERE id = ?",
         [id],
-        |row| row_to_channel(row),
+        row_to_channel,
     )
 }
 
@@ -1404,7 +1444,7 @@ pub fn export_all_data(conn: &Connection) -> rusqlite::Result<serde_json::Value>
 
     Ok(serde_json::json!({
         "version": 1,
-        "exported_at": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        "exported_at": now_iso_timestamp(),
         "categories": categories,
         "subscriptions": subs,
         "billing_records": billing_records,
@@ -1463,7 +1503,7 @@ pub fn import_native_data(conn: &Connection, data: &serde_json::Value) -> Result
             let link = s.get("link").and_then(|v| v.as_str()).map(|s| s.to_string());
             let created_at = s.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
             let now = if created_at.is_empty() {
-                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+                now_timestamp()
             } else {
                 created_at.to_string()
             };
@@ -1527,7 +1567,7 @@ pub fn import_native_data(conn: &Connection, data: &serde_json::Value) -> Result
             let show_on_main = sub.get("show_on_main").and_then(|v| v.as_bool()).unwrap_or(true);
             let created_at = sub.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
             let updated_at = sub.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
-            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let now = now_timestamp();
             let ca = if created_at.is_empty() { &now } else { created_at };
             let ua = if updated_at.is_empty() { &now } else { updated_at };
 
@@ -1646,7 +1686,7 @@ pub fn import_native_data(conn: &Connection, data: &serde_json::Value) -> Result
             let config = ch.get("config").cloned().unwrap_or(serde_json::json!({}));
             let config_str = serde_json::to_string(&config).unwrap_or_default();
             let created_at = ch.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
-            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let now = now_timestamp();
             let ca = if created_at.is_empty() { &now } else { created_at };
 
             tx.execute(
@@ -1680,7 +1720,7 @@ pub fn import_native_data(conn: &Connection, data: &serde_json::Value) -> Result
             };
             let next_bill_date = log.get("next_bill_date").and_then(|v| v.as_str()).unwrap_or("");
             let sent_at = log.get("sent_at").and_then(|v| v.as_str()).unwrap_or("");
-            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let now = now_timestamp();
             let sa = if sent_at.is_empty() { &now } else { sent_at };
 
             tx.execute(
@@ -1704,7 +1744,7 @@ fn parse_date(s: &str) -> NaiveDate {
 }
 
 fn recalc_next_bill_date(billing_date: NaiveDate, cycle: &BillingCycle) -> NaiveDate {
-    let today = chrono::Local::now().date_naive();
+    let today = today_date();
     let mut next = billing_date;
     while next <= today {
         next = cycle.next_date(next);
@@ -1712,34 +1752,33 @@ fn recalc_next_bill_date(billing_date: NaiveDate, cycle: &BillingCycle) -> Naive
     next
 }
 
-/// 自动推进过期的 next_bill_date（用于无结束日期的周期性订阅）
-/// 在读取订阅时调用，确保 UI 上始终显示正确的下一付款日期
-fn auto_advance_next_bill_date(conn: &Connection, sub: &mut Subscription) {
-    // 不处理：一次性订阅、已暂停、有结束日期、无 next_bill_date
+/// 计算是否需要推进 next_bill_date，返回新日期（不写数据库）
+fn calc_advance_next_bill_date(sub: &Subscription, today: NaiveDate) -> Option<NaiveDate> {
     if sub.is_one_time || sub.is_suspended || sub.end_date.is_some() {
-        return;
+        return None;
     }
-    let Some(next_bill) = sub.next_bill_date else { return };
-
-    let today = chrono::Local::now().date_naive();
+    let next_bill = sub.next_bill_date?;
     if next_bill >= today {
-        return; // 还没过期，不需要推进
+        return None;
     }
-
     let cycle = BillingCycle::from_str(&sub.billing_cycle).unwrap_or(BillingCycle::Month1);
-    let new_next = recalc_next_bill_date(sub.billing_date, &cycle);
+    Some(recalc_next_bill_date(sub.billing_date, &cycle))
+}
 
-    // 写回数据库
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    if let Err(e) = conn.execute(
-        "UPDATE subscriptions SET next_bill_date=?1, updated_at=?2 WHERE id=?3",
-        params![new_next.to_string(), now, sub.id],
-    ) {
-        log::error!("自动推进 next_bill_date 失败: sub={}, error={}", sub.id, e);
-        return;
+/// 自动推进过期的 next_bill_date（单个订阅，立即写数据库）
+fn auto_advance_next_bill_date(conn: &Connection, sub: &mut Subscription) {
+    let today = today_date();
+    if let Some(new_next) = calc_advance_next_bill_date(sub, today) {
+        let now = now_timestamp();
+        if let Err(e) = conn.execute(
+            "UPDATE subscriptions SET next_bill_date=?1, updated_at=?2 WHERE id=?3",
+            params![new_next.to_string(), now, sub.id],
+        ) {
+            log::error!("自动推进 next_bill_date 失败: sub={}, error={}", sub.id, e);
+            return;
+        }
+        sub.next_bill_date = Some(new_next);
     }
-
-    sub.next_bill_date = Some(new_next);
 }
 
 /// 根据账单记录同步订阅的 end_date、price、currency、billing_cycle、next_bill_date。
@@ -1787,7 +1826,7 @@ pub fn sync_subscription_from_records(conn: &Connection, sub_id: &str) -> rusqli
         Some(recalc_next_bill_date(period_start, &effective_cycle))
     };
 
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = now_timestamp();
 
     // 只同步 end_date 和 next_bill_date，不覆盖 price/currency/billing_cycle
     // 订阅的 price 作为「原始价格」保留，effective_records 负责显示当前实际价格
@@ -1836,9 +1875,9 @@ pub fn get_due_reminder_subscriptions(conn: &Connection) -> rusqlite::Result<Vec
     );
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], |row| row_to_subscription(row))?;
+    let rows = stmt.query_map([], row_to_subscription)?;
 
-    let today = chrono::Local::now().date_naive();
+    let today = today_date();
     let mut due: Vec<Subscription> = Vec::new();
 
     for sub in rows {

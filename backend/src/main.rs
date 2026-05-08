@@ -60,10 +60,10 @@ async fn main() -> std::io::Result<()> {
         .unwrap_or_else(|| "0.0.0.0".to_string());
 
     // 自动创建数据库所在目录
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).expect("Failed to create database directory");
-        }
+    if let Some(parent) = std::path::Path::new(&db_path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).expect("Failed to create database directory");
     }
 
     let conn = Connection::open(&db_path).expect("Failed to open database");
