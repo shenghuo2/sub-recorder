@@ -411,3 +411,10 @@ export async function testNotification(data: { channel_type: string; config: any
     body: JSON.stringify(data),
   });
 }
+
+export async function telegramGetChatId(botToken: string) {
+  return request<any[]>("/api/telegram/get-chat-id", {
+    method: "POST",
+    body: JSON.stringify({ bot_token: botToken }),
+  });
+}

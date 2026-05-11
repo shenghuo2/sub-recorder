@@ -90,34 +90,34 @@ interface ExchangeRates {
 const RATE_CACHE_KEY = "sub_recorder_exchange_rates";
 const RATE_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
-// 内置 fallback 汇率 (基于 CNY，表示 1 外币 = X CNY)
+// 内置 fallback 汇率 (基于 CNY，表示 1 CNY = X 外币)
 const FALLBACK_RATES: Record<string, number> = {
   CNY: 1,
-  USD: 7.3,      // 1 USD ≈ 7.3 CNY
-  EUR: 7.9,      // 1 EUR ≈ 7.9 CNY
-  GBP: 9.2,      // 1 GBP ≈ 9.2 CNY
-  JPY: 0.048,    // 1 JPY ≈ 0.048 CNY
-  KRW: 0.0053,   // 1 KRW ≈ 0.0053 CNY
-  INR: 0.087,    // 1 INR ≈ 0.087 CNY
-  RUB: 0.079,    // 1 RUB ≈ 0.079 CNY
-  HKD: 0.93,     // 1 HKD ≈ 0.93 CNY
-  TWD: 0.23,     // 1 TWD ≈ 0.23 CNY
-  CAD: 5.3,      // 1 CAD ≈ 5.3 CNY
-  AUD: 4.8,      // 1 AUD ≈ 4.8 CNY
-  SGD: 5.4,      // 1 SGD ≈ 5.4 CNY
-  THB: 0.21,     // 1 THB ≈ 0.21 CNY
-  VND: 0.00029,  // 1 VND ≈ 0.00029 CNY
-  MYR: 1.64,     // 1 MYR ≈ 1.64 CNY
-  PHP: 0.13,     // 1 PHP ≈ 0.13 CNY
-  TRY: 0.20,     // 1 TRY ≈ 0.20 CNY
-  BRL: 1.27,     // 1 BRL ≈ 1.27 CNY
-  CHF: 8.3,      // 1 CHF ≈ 8.3 CNY
-  SEK: 0.70,     // 1 SEK ≈ 0.70 CNY
-  NOK: 0.68,     // 1 NOK ≈ 0.68 CNY
-  DKK: 1.06,     // 1 DKK ≈ 1.06 CNY
-  PLN: 1.82,     // 1 PLN ≈ 1.82 CNY
-  NZD: 4.3,      // 1 NZD ≈ 4.3 CNY
-  NGN: 0.016,    // 1 NGN ≈ 0.016 CNY
+  USD: 0.137,     // 1 CNY ≈ 0.137 USD
+  EUR: 0.127,     // 1 CNY ≈ 0.127 EUR
+  GBP: 0.109,     // 1 CNY ≈ 0.109 GBP
+  JPY: 20.83,     // 1 CNY ≈ 20.83 JPY
+  KRW: 188.68,    // 1 CNY ≈ 188.68 KRW
+  INR: 11.49,     // 1 CNY ≈ 11.49 INR
+  RUB: 12.66,     // 1 CNY ≈ 12.66 RUB
+  HKD: 1.075,     // 1 CNY ≈ 1.075 HKD
+  TWD: 4.35,      // 1 CNY ≈ 4.35 TWD
+  CAD: 0.189,     // 1 CNY ≈ 0.189 CAD
+  AUD: 0.208,     // 1 CNY ≈ 0.208 AUD
+  SGD: 0.185,     // 1 CNY ≈ 0.185 SGD
+  THB: 4.76,      // 1 CNY ≈ 4.76 THB
+  VND: 3448.28,   // 1 CNY ≈ 3448.28 VND
+  MYR: 0.610,     // 1 CNY ≈ 0.610 MYR
+  PHP: 7.69,      // 1 CNY ≈ 7.69 PHP
+  TRY: 5.0,       // 1 CNY ≈ 5.0 TRY
+  BRL: 0.787,     // 1 CNY ≈ 0.787 BRL
+  CHF: 0.120,     // 1 CNY ≈ 0.120 CHF
+  SEK: 1.429,     // 1 CNY ≈ 1.429 SEK
+  NOK: 1.471,     // 1 CNY ≈ 1.471 NOK
+  DKK: 0.943,     // 1 CNY ≈ 0.943 DKK
+  PLN: 0.549,     // 1 CNY ≈ 0.549 PLN
+  NZD: 0.233,     // 1 CNY ≈ 0.233 NZD
+  NGN: 62.5,      // 1 CNY ≈ 62.5 NGN
 };
 
 function getCachedRates(): ExchangeRates | null {

@@ -1103,6 +1103,31 @@ async fn do_test_telegram(config: &serde_json::Value) -> HttpResponse {
     }
 }
 
+pub async fn telegram_get_chat_id(body: web::Json<serde_json::Value>) -> HttpResponse {
+    let bot_token = body.get("bot_token").and_then(|v| v.as_str()).unwrap_or("");
+    if bot_token.is_empty() {
+        return HttpResponse::BadRequest().json(ApiResponse::<()>::err("请填写机器人令牌".to_string()));
+    }
+
+    let url = format!("https://api.telegram.org/bot{}/getUpdates?limit=10", bot_token);
+    let client = reqwest::Client::new();
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            let body_text = resp.text().await.unwrap_or_default();
+            let json: serde_json::Value = serde_json::from_str(&body_text).unwrap_or_default();
+            if json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                HttpResponse::Ok().json(ApiResponse::ok(json["result"].clone()))
+            } else {
+                let desc = json.get("description").and_then(|v| v.as_str()).unwrap_or("获取失败");
+                HttpResponse::BadRequest().json(ApiResponse::<()>::err(desc.to_string()))
+            }
+        }
+        Err(e) => {
+            HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("请求失败: {}", e)))
+        }
+    }
+}
+
 // ========== 提醒发送 ==========
 
 /// 构建提醒消息文本

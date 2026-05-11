@@ -1205,10 +1205,10 @@ fn is_sha256_hash(hash: &str) -> bool {
 }
 
 pub fn generate_random_password() -> String {
-    use uuid::Uuid;
-    let uuid = Uuid::new_v4().to_string();
-    // Take first 12 chars for a readable password
-    uuid.chars().filter(|c| c.is_alphanumeric()).take(12).collect()
+    use rand::Rng;
+    const CHARSET: &[u8] = b"abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let mut rng = rand::thread_rng();
+    (0..16).map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char).collect()
 }
 
 pub struct User {
@@ -1785,14 +1785,16 @@ pub fn import_native_data(conn: &Connection, data: &serde_json::Value) -> Result
 // ========== 辅助函数 ==========
 
 fn parse_date(s: &str) -> NaiveDate {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap_or_default()
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap_or_else(|_| today_date())
 }
 
 fn recalc_next_bill_date(billing_date: NaiveDate, cycle: &BillingCycle) -> NaiveDate {
     let today = today_date();
     let mut next = billing_date;
-    while next <= today {
+    let mut iterations = 0;
+    while next <= today && iterations < 10000 {
         next = cycle.next_date(next);
+        iterations += 1;
     }
     next
 }

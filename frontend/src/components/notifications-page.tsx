@@ -14,6 +14,7 @@ import {
   updateNotificationChannel,
   deleteNotificationChannel,
   testNotification,
+  telegramGetChatId,
   type NotificationChannel,
 } from "@/lib/api";
 
@@ -43,7 +44,7 @@ export function NotificationsPage() {
   const [webhookMethod, setWebhookMethod] = useState("POST");
   const [webhookType, setWebhookType] = useState("onebot");
   const [webhookHeaders, setWebhookHeaders] = useState("");
-  const [webhookBodyTemplate, setWebhookBodyTemplate] = useState('{"message": "{message"}');
+  const [webhookBodyTemplate, setWebhookBodyTemplate] = useState('{"message": "{message}"}');
 
   // OneBot 专用配置
   const [onebotAccessToken, setOnebotAccessToken] = useState("");
@@ -91,7 +92,7 @@ export function NotificationsPage() {
     setWebhookMethod("POST");
     setWebhookType("onebot");
     setWebhookHeaders("");
-    setWebhookBodyTemplate('{"message": "{message"}');
+    setWebhookBodyTemplate('{"message": "{message}"}');
     setOnebotAccessToken("");
     setOnebotMessageType("private");
     setOnebotTargetId("");
@@ -133,7 +134,7 @@ export function NotificationsPage() {
       setWebhookUrl(config.url || "");
       setWebhookMethod(config.method || "POST");
       setWebhookHeaders(config.headers ? JSON.stringify(config.headers, null, 2) : "");
-      setWebhookBodyTemplate(config.body_template || '{"message": "{message"}');
+      setWebhookBodyTemplate(config.body_template || '{"message": "{message}"}');
     }
 
     setShowAddForm(true);
@@ -147,18 +148,13 @@ export function NotificationsPage() {
     }
     setFetchingChatId(true);
     try {
-      const resp = await fetch(`https://api.telegram.org/bot${telegramBotToken}/getUpdates?limit=10`);
-      const data = await resp.json();
-      if (!data.ok) {
-        toast.error(data.description || "获取失败");
-        return;
-      }
-      if (!data.result || data.result.length === 0) {
+      const results = await telegramGetChatId(telegramBotToken);
+      if (!results || results.length === 0) {
         toast.error("没有找到消息，请先给机器人发送一条消息");
         return;
       }
       // 获取最新的 chat_id
-      const lastMsg = data.result[data.result.length - 1];
+      const lastMsg = results[results.length - 1];
       const chatId = lastMsg.message?.chat?.id || lastMsg.channel_post?.chat?.id;
       if (chatId) {
         setTelegramChatId(String(chatId));

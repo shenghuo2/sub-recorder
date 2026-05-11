@@ -156,6 +156,7 @@ async fn main() -> std::io::Result<()> {
             .route("/api/notifications/channels/{id}", web::delete().to(handlers::delete_notification_channel))
             .route("/api/notifications/test", web::post().to(handlers::test_notification))
             .route("/api/notifications/trigger-reminders", web::post().to(handlers::trigger_reminders))
+            .route("/api/telegram/get-chat-id", web::post().to(handlers::telegram_get_chat_id))
             // 静态文件 + SPA fallback（目录存在时才注册）
             .configure(|cfg| {
                 let dir = static_dir();
