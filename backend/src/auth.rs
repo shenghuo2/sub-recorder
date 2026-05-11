@@ -109,7 +109,7 @@ where
 
             let is_valid = if !token.is_empty() {
                 if let Some(state) = req.app_data::<web::Data<AppState>>() {
-                    let conn = state.db.lock().unwrap();
+                    let conn = state.conn();
                     crate::db::validate_session(&conn, token).is_some()
                 } else {
                     false

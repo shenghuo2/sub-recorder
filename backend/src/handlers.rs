@@ -8,7 +8,7 @@ pub async fn create_subscription(
     state: web::Data<AppState>,
     body: web::Json<CreateSubscription>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::create_subscription(&conn, &body) {
         Ok(sub) => HttpResponse::Created().json(ApiResponse::ok(sub)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -16,7 +16,7 @@ pub async fn create_subscription(
 }
 
 pub async fn list_subscriptions(state: web::Data<AppState>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::list_subscriptions(&conn) {
         Ok(subs) => HttpResponse::Ok().json(ApiResponse::ok(subs)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -27,7 +27,7 @@ pub async fn get_subscription(
     state: web::Data<AppState>,
     path: web::Path<String>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::get_subscription_detail(&conn, &id) {
         Ok(Some(detail)) => HttpResponse::Ok().json(ApiResponse::ok(detail)),
@@ -41,7 +41,7 @@ pub async fn update_subscription(
     path: web::Path<String>,
     body: web::Json<UpdateSubscription>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::update_subscription(&conn, &id, &body) {
         Ok(Some(sub)) => HttpResponse::Ok().json(ApiResponse::ok(sub)),
@@ -54,7 +54,7 @@ pub async fn delete_subscription(
     state: web::Data<AppState>,
     path: web::Path<String>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::delete_subscription(&conn, &id) {
         Ok(true) => HttpResponse::Ok().json(ApiResponse::ok("已删除")),
@@ -70,7 +70,7 @@ pub async fn suspend_subscription(
     path: web::Path<String>,
     body: web::Json<SuspendRequest>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::suspend_subscription(&conn, &id, &body) {
         Ok(Some(sub)) => HttpResponse::Ok().json(ApiResponse::ok(sub)),
@@ -84,7 +84,7 @@ pub async fn resume_subscription(
     path: web::Path<String>,
     body: web::Json<ResumeRequest>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::resume_subscription(&conn, &id, &body) {
         Ok(Some(sub)) => HttpResponse::Ok().json(ApiResponse::ok(sub)),
@@ -100,7 +100,7 @@ pub async fn upload_icon(
     path: web::Path<String>,
     body: web::Json<UploadIcon>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     let mime = body.mime_type.as_deref().unwrap_or("image/png");
     match db::update_subscription_icon(&conn, &id, &body.icon, mime) {
@@ -163,7 +163,7 @@ pub async fn upload_icon_from_url(
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::update_subscription_icon(&conn, &id, &b64, mime) {
         Ok(true) => HttpResponse::Ok().json(ApiResponse::ok("图标已更新")),
         Ok(false) => HttpResponse::NotFound().json(ApiResponse::<()>::err("订阅不存在")),
@@ -175,7 +175,7 @@ pub async fn get_icon(
     state: web::Data<AppState>,
     path: web::Path<String>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::get_subscription_icon(&conn, &id) {
         Ok(Some((blob, mime))) => HttpResponse::Ok()
@@ -193,7 +193,7 @@ pub async fn create_billing_record(
     path: web::Path<String>,
     body: web::Json<CreateBillingRecord>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let sub_id = path.into_inner();
     match db::create_billing_record(&conn, &sub_id, &body) {
         Ok(Some(record)) => HttpResponse::Created().json(ApiResponse::ok(record)),
@@ -206,7 +206,7 @@ pub async fn list_billing_records(
     state: web::Data<AppState>,
     path: web::Path<String>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let sub_id = path.into_inner();
     match db::list_billing_records(&conn, &sub_id) {
         Ok(records) => HttpResponse::Ok().json(ApiResponse::ok(records)),
@@ -219,7 +219,7 @@ pub async fn update_billing_record(
     path: web::Path<i64>,
     body: web::Json<UpdateBillingRecord>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::update_billing_record(&conn, id, &body) {
         Ok(Some(record)) => HttpResponse::Ok().json(ApiResponse::ok(record)),
@@ -232,7 +232,7 @@ pub async fn delete_billing_record(
     state: web::Data<AppState>,
     path: web::Path<i64>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::delete_billing_record(&conn, id) {
         Ok(true) => HttpResponse::Ok().json(ApiResponse::ok("已删除")),
@@ -247,7 +247,7 @@ pub async fn create_category(
     state: web::Data<AppState>,
     body: web::Json<CreateCategory>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::create_category(&conn, &body) {
         Ok(cat) => HttpResponse::Created().json(ApiResponse::ok(cat)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -255,7 +255,7 @@ pub async fn create_category(
 }
 
 pub async fn list_categories(state: web::Data<AppState>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::list_categories(&conn) {
         Ok(cats) => HttpResponse::Ok().json(ApiResponse::ok(cats)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -267,7 +267,7 @@ pub async fn update_category(
     path: web::Path<i64>,
     body: web::Json<UpdateCategory>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::update_category(&conn, id, &body) {
         Ok(Some(cat)) => HttpResponse::Ok().json(ApiResponse::ok(cat)),
@@ -280,7 +280,7 @@ pub async fn delete_category(
     state: web::Data<AppState>,
     path: web::Path<i64>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::delete_category(&conn, id) {
         Ok(true) => HttpResponse::Ok().json(ApiResponse::ok("已删除")),
@@ -295,7 +295,7 @@ pub async fn create_scene(
     state: web::Data<AppState>,
     body: web::Json<CreateScene>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::create_scene(&conn, &body) {
         Ok(scene) => HttpResponse::Created().json(ApiResponse::ok(scene)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -303,7 +303,7 @@ pub async fn create_scene(
 }
 
 pub async fn list_scenes(state: web::Data<AppState>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::list_scenes(&conn) {
         Ok(scenes) => HttpResponse::Ok().json(ApiResponse::ok(scenes)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -314,7 +314,7 @@ pub async fn get_scene(
     state: web::Data<AppState>,
     path: web::Path<String>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::get_scene_detail(&conn, &id) {
         Ok(Some(detail)) => HttpResponse::Ok().json(ApiResponse::ok(detail)),
@@ -328,7 +328,7 @@ pub async fn update_scene(
     path: web::Path<String>,
     body: web::Json<UpdateScene>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::update_scene(&conn, &id, &body) {
         Ok(Some(scene)) => HttpResponse::Ok().json(ApiResponse::ok(scene)),
@@ -341,7 +341,7 @@ pub async fn delete_scene(
     state: web::Data<AppState>,
     path: web::Path<String>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let id = path.into_inner();
     match db::delete_scene(&conn, &id) {
         Ok(true) => HttpResponse::Ok().json(ApiResponse::ok("已删除")),
@@ -355,7 +355,7 @@ pub async fn delete_scene(
 pub async fn export_data(
     state: web::Data<AppState>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::export_all_data(&conn) {
         Ok(data) => HttpResponse::Ok().json(ApiResponse::ok(data)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -368,7 +368,7 @@ pub async fn import_native_data(
     state: web::Data<AppState>,
     body: web::Json<serde_json::Value>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::import_native_data(&conn, &body) {
         Ok(msg) => HttpResponse::Ok().json(ApiResponse::ok(msg)),
         Err(e) => HttpResponse::BadRequest().json(ApiResponse::<()>::err(e)),
@@ -379,7 +379,7 @@ pub async fn import_data(
     state: web::Data<AppState>,
     body: web::Json<serde_json::Value>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     let mut imported = 0;
     let mut errors: Vec<String> = Vec::new();
 
@@ -633,7 +633,7 @@ pub async fn login(
     body: web::Json<LoginRequest>,
 ) -> HttpResponse {
     use crate::auth::is_auth_disabled;
-    
+
     // 如果禁用鉴权，直接返回成功
     if is_auth_disabled() {
         return HttpResponse::Ok().json(ApiResponse::ok(LoginResponse {
@@ -642,16 +642,31 @@ pub async fn login(
             require_auth: false,
         }));
     }
-    
-    let conn = state.db.lock().unwrap();
-    
+
+    // 频率限制：5 分钟内最多 5 次尝试
+    {
+        let mut limiter = state.login_limiter.lock().unwrap_or_else(|e| e.into_inner());
+        if !limiter.check_and_record() {
+            return HttpResponse::TooManyRequests().json(
+                ApiResponse::<()>::err("登录尝试过于频繁，请 5 分钟后再试")
+            );
+        }
+    }
+
+    let conn = state.conn();
+
     // 验证密码
     if db::verify_password(&conn, &body.password) {
+        // 登录成功，清除限流计数
+        let mut limiter = state.login_limiter.lock().unwrap_or_else(|e| e.into_inner());
+        limiter.clear();
+        drop(limiter);
+
         // 获取用户信息
         let user = db::get_user(&conn).ok().flatten();
         let username = user.as_ref().map(|u| u.username.clone()).unwrap_or_else(|| "admin".to_string());
         let user_id = user.as_ref().map(|u| u._id).unwrap_or(1);
-        
+
         // 创建 session token
         match db::create_session(&conn, user_id) {
             Ok(token) => {
@@ -681,7 +696,7 @@ pub async fn logout(
         .unwrap_or("");
     
     if !token.is_empty() {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn();
         let _ = db::delete_session(&conn, token);
     }
     
@@ -717,7 +732,7 @@ pub struct UserInfo {
 }
 
 pub async fn get_user_info(state: web::Data<AppState>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::get_user(&conn) {
         Ok(Some(user)) => HttpResponse::Ok().json(ApiResponse::ok(UserInfo {
             username: user.username,
@@ -738,7 +753,7 @@ pub async fn update_user(
     state: web::Data<AppState>,
     body: web::Json<UpdateUserRequest>,
 ) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
 
     // demo 模式下禁止修改用户名和密码
     let demo_mode = std::env::var("DEMO_MODE")
@@ -789,7 +804,7 @@ pub async fn update_user(
 // ========== 通知渠道 ==========
 
 pub async fn list_notification_channels(state: web::Data<AppState>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::list_notification_channels(&conn) {
         Ok(channels) => HttpResponse::Ok().json(ApiResponse::ok(channels)),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -797,7 +812,7 @@ pub async fn list_notification_channels(state: web::Data<AppState>) -> HttpRespo
 }
 
 pub async fn get_notification_channel(state: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::get_notification_channel(&conn, &path) {
         Ok(ch) => HttpResponse::Ok().json(ApiResponse::ok(ch)),
         Err(_) => HttpResponse::NotFound().json(ApiResponse::<()>::err("渠道不存在".to_string())),
@@ -805,7 +820,7 @@ pub async fn get_notification_channel(state: web::Data<AppState>, path: web::Pat
 }
 
 pub async fn create_notification_channel(state: web::Data<AppState>, body: web::Json<CreateNotificationChannel>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::create_notification_channel(&conn, &body) {
         Ok(id) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"id": id}))),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -813,7 +828,7 @@ pub async fn create_notification_channel(state: web::Data<AppState>, body: web::
 }
 
 pub async fn update_notification_channel(state: web::Data<AppState>, path: web::Path<String>, body: web::Json<UpdateNotificationChannel>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::update_notification_channel(&conn, &path, &body) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true}))),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -821,7 +836,7 @@ pub async fn update_notification_channel(state: web::Data<AppState>, path: web::
 }
 
 pub async fn delete_notification_channel(state: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn();
     match db::delete_notification_channel(&conn, &path) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true}))),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::<()>::err(e.to_string())),
@@ -1261,7 +1276,7 @@ async fn send_webhook_reminder(cfg: &WebhookChannelConfig, sub: &Subscription) -
 /// 为单个订阅发送提醒（遍历所有已启用的通知渠道）
 async fn send_reminder_for_subscription(state: &web::Data<AppState>, sub: &Subscription) {
     let channels = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn();
         match db::list_notification_channels(&conn) {
             Ok(chs) => chs,
             Err(e) => {
@@ -1282,7 +1297,7 @@ async fn send_reminder_for_subscription(state: &web::Data<AppState>, sub: &Subsc
 
         // 跳过已发送的
         {
-            let conn = state.db.lock().unwrap();
+            let conn = state.conn();
             if db::has_reminder_been_sent(&conn, &sub.id, &ch.id, &next_bill_date) {
                 continue;
             }
@@ -1322,7 +1337,7 @@ async fn send_reminder_for_subscription(state: &web::Data<AppState>, sub: &Subsc
         match result {
             Ok(()) => {
                 log::info!("提醒已发送: sub={}, channel={}({})", sub.id, ch.name, ch.channel_type);
-                let conn = state.db.lock().unwrap();
+                let conn = state.conn();
                 if let Err(e) = db::record_reminder_sent(&conn, &sub.id, &ch.id, &next_bill_date) {
                     log::error!("记录提醒日志失败: {}", e);
                 }
@@ -1337,7 +1352,7 @@ async fn send_reminder_for_subscription(state: &web::Data<AppState>, sub: &Subsc
 /// 执行一次提醒检查（供后台任务和手动触发共用）
 pub async fn run_reminder_check(state: &web::Data<AppState>) {
     let due_subs = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn();
         match db::get_due_reminder_subscriptions(&conn) {
             Ok(subs) => subs,
             Err(e) => {

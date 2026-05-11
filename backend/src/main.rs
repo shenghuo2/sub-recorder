@@ -76,7 +76,10 @@ async fn main() -> std::io::Result<()> {
     log::info!("鉴权状态: {}", if auth_enabled { "已启用" } else { "已禁用 (DISABLE_AUTH=true)" });
     log::info!("服务启动在 http://{}:{}", host, port);
 
-    let state = web::Data::new(AppState { db: Mutex::new(conn) });
+    let state = web::Data::new(AppState {
+        db: Mutex::new(conn),
+        login_limiter: Mutex::new(db::LoginRateLimiter::new()),
+    });
 
     // 后台提醒任务：定期检查并发送到期提醒
     let reminder_state = state.clone();

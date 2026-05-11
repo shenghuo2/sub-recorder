@@ -47,7 +47,7 @@ impl BillingCycle {
         // Handle custom_days:XX format
         if s.starts_with("custom_days:") {
             let days_str = s.strip_prefix("custom_days:")?;
-            let days: u32 = days_str.parse().ok()?;
+            let days: u32 = days_str.parse().ok().filter(|&d| d > 0)?;
             return Some(Self::CustomDays(days));
         }
         match s {

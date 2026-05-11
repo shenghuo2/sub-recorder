@@ -1,12 +1,46 @@
 use rusqlite::{Connection, params, OptionalExtension};
 use std::sync::Mutex;
+use std::time::Instant;
 use chrono::NaiveDate;
 use rand::RngCore;
 
 use crate::models::*;
 
+pub struct LoginRateLimiter {
+    attempts: Vec<Instant>,
+}
+
+impl LoginRateLimiter {
+    pub fn new() -> Self {
+        Self { attempts: Vec::new() }
+    }
+
+    /// 检查是否允许登录尝试。窗口期 5 分钟内最多 5 次。
+    pub fn check_and_record(&mut self) -> bool {
+        let window = std::time::Duration::from_secs(300);
+        let now = Instant::now();
+        self.attempts.retain(|t| now.duration_since(*t) < window);
+        if self.attempts.len() >= 5 {
+            return false;
+        }
+        self.attempts.push(now);
+        true
+    }
+
+    pub fn clear(&mut self) {
+        self.attempts.clear();
+    }
+}
+
 pub struct AppState {
     pub db: Mutex<Connection>,
+    pub login_limiter: Mutex<LoginRateLimiter>,
+}
+
+impl AppState {
+    pub fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.db.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 // ========== 时间戳辅助函数 ==========
@@ -1274,30 +1308,41 @@ pub fn generate_session_token() -> String {
     hex::encode(bytes)
 }
 
-/// Create a new session, returns the token. Default expiry: 30 days.
+/// Hash a session token with SHA-256 for storage
+fn hash_token(token: &str) -> String {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// Create a new session, returns the raw token. Stores SHA-256 hash. Default expiry: 30 days.
 pub fn create_session(conn: &Connection, user_id: i64) -> rusqlite::Result<String> {
     // Clean up expired sessions first
     cleanup_expired_sessions(conn)?;
     let token = generate_session_token();
+    let token_hash = hash_token(&token);
     conn.execute(
         "INSERT INTO sessions (token, user_id, expires_at) VALUES (?1, ?2, datetime('now', '+30 days'))",
-        params![token, user_id],
+        params![token_hash, user_id],
     )?;
     Ok(token)
 }
 
 /// Validate a session token. Returns user_id if valid and not expired.
 pub fn validate_session(conn: &Connection, token: &str) -> Option<i64> {
+    let token_hash = hash_token(token);
     conn.query_row(
         "SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')",
-        params![token],
+        params![token_hash],
         |row| row.get(0),
     ).ok()
 }
 
 /// Delete a specific session (logout)
 pub fn delete_session(conn: &Connection, token: &str) -> rusqlite::Result<()> {
-    conn.execute("DELETE FROM sessions WHERE token = ?1", params![token])?;
+    let token_hash = hash_token(token);
+    conn.execute("DELETE FROM sessions WHERE token = ?1", params![token_hash])?;
     Ok(())
 }
 
@@ -1754,7 +1799,11 @@ fn recalc_next_bill_date(billing_date: NaiveDate, cycle: &BillingCycle) -> Naive
 
 /// 计算是否需要推进 next_bill_date，返回新日期（不写数据库）
 fn calc_advance_next_bill_date(sub: &Subscription, today: NaiveDate) -> Option<NaiveDate> {
-    if sub.is_one_time || sub.is_suspended || sub.end_date.is_some() {
+    if sub.is_one_time || sub.is_suspended {
+        return None;
+    }
+    // end_date 在未来说明当前周期未结束，不需要推进
+    if let Some(end) = sub.end_date && end >= today {
         return None;
     }
     let next_bill = sub.next_bill_date?;
@@ -1826,14 +1875,21 @@ pub fn sync_subscription_from_records(conn: &Connection, sub_id: &str) -> rusqli
         Some(recalc_next_bill_date(period_start, &effective_cycle))
     };
 
+    // 只在账单记录的 period_end 比当前 end_date 更新时才同步
+    // 避免覆盖用户手动设置的更晚的 end_date
+    let new_end_date = match sub.end_date {
+        Some(existing) => {
+            if period_end > existing { period_end } else { existing }
+        }
+        None => period_end,
+    };
+
     let now = now_timestamp();
 
-    // 只同步 end_date 和 next_bill_date，不覆盖 price/currency/billing_cycle
-    // 订阅的 price 作为「原始价格」保留，effective_records 负责显示当前实际价格
     conn.execute(
         "UPDATE subscriptions SET end_date=?1, next_bill_date=?2, updated_at=?3 WHERE id=?4",
         params![
-            period_end.to_string(),
+            new_end_date.to_string(),
             next_bill.map(|d| d.to_string()),
             now,
             sub_id,
@@ -1841,7 +1897,7 @@ pub fn sync_subscription_from_records(conn: &Connection, sub_id: &str) -> rusqli
     )?;
 
     log::info!("已同步订阅 {} 状态: end_date={}, next_bill={:?}",
-        sub_id, period_end, next_bill);
+        sub_id, new_end_date, next_bill);
 
     Ok(())
 }
