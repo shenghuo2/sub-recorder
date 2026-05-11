@@ -872,8 +872,12 @@ async fn do_test_smtp(config: &serde_json::Value) -> HttpResponse {
 
     match conn_result {
         Ok(mut client) => match client.send(message).await {
-            Ok(_) => HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试邮件已发送"}))),
+            Ok(_) => {
+                let _ = client.quit().await;
+                HttpResponse::Ok().json(ApiResponse::ok(serde_json::json!({"success": true, "message": "测试邮件已发送"})))
+            }
             Err(e) => {
+                let _ = client.quit().await;
                 log::error!("SMTP send failed: {}", e);
                 HttpResponse::BadRequest().json(ApiResponse::<()>::err(format!("发送失败: {}", e)))
             }
@@ -1143,6 +1147,7 @@ async fn send_smtp_reminder(cfg: &SmtpChannelConfig, sub: &Subscription) -> Resu
 
     let mut client = conn_result.map_err(|e| format!("SMTP 连接失败: {}", e))?;
     client.send(message).await.map_err(|e| format!("SMTP 发送失败: {}", e))?;
+    let _ = client.quit().await;
     Ok(())
 }
 

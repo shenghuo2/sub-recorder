@@ -115,7 +115,7 @@ export function NotificationsPage() {
       setSmtpHost(config.host || "");
       setSmtpPort(config.port || 587);
       setSmtpUsername(config.username || "");
-      setSmtpPassword("");
+      setSmtpPassword(config.password || "");
       setSmtpFromEmail(config.from_email || "");
       setSmtpFromName(config.from_name || "Sub Recorder");
       setSmtpToEmail(config.to_email || "");
